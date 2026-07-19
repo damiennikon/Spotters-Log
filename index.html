@@ -1,0 +1,2510 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#08090b" />
+  <title>Shot Log – Arriving Soon (Brisbane)</title>
+
+  <link rel="manifest" href="/photo-log/manifest.json">
+
+<link rel="icon" href="/photo-log/icons/icon-192.png" sizes="192x192">
+<link rel="apple-touch-icon" href="/photo-log/icons/icon-192.png">
+
+<meta name="theme-color" content="#08090b">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    --bg:#08090b;
+    --surface:#0e0f13;
+    --surface-2:#131519;
+    --surface-3:#1a1c22;
+    --border:rgba(255,255,255,0.07);
+    --border-strong:rgba(255,255,255,0.13);
+    --text:#f1f2f4;
+    --text-2:#9a9ca4;
+    --text-3:#5c5e66;
+    --accent:#6c8dfa;
+    --accent-soft:rgba(108,141,250,0.10);
+    --accent-border:rgba(108,141,250,0.30);
+    --warn:#e6b352;
+    --warn-soft:rgba(230,179,82,0.10);
+    --warn-border:rgba(230,179,82,0.30);
+    --ok:#4fbf8b;
+    --ok-soft:rgba(79,191,139,0.10);
+    --ok-border:rgba(79,191,139,0.30);
+    --danger:#e2626c;
+    --danger-soft:rgba(226,98,108,0.10);
+    --danger-border:rgba(226,98,108,0.35);
+
+    --r-lg:16px;
+    --r-md:12px;
+    --r-sm:9px;
+
+    --sh-card: 0 1px 1px rgba(0,0,0,0.3), 0 10px 24px -14px rgba(0,0,0,0.7);
+  }
+  *{box-sizing:border-box;}
+  html,body{height:100%;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family:'Inter',ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial;
+    -webkit-font-smoothing:antialiased;
+    font-variant-numeric:tabular-nums;
+  }
+  .mono{font-family:'IBM Plex Mono',ui-monospace,monospace;}
+  svg{display:block;}
+
+  .wrap{ max-width:480px; margin:0 auto; padding:20px 16px 60px; }
+
+  /* ---------- Top nav ---------- */
+  .top{ display:flex; align-items:center; justify-content:space-between; gap:10px; }
+  .brand{ display:flex; align-items:center; gap:10px; }
+  .logo{
+    width:30px;height:30px;border-radius:9px;
+    background:var(--surface-2);border:1px solid var(--border-strong);
+    display:grid;place-items:center; flex:0 0 auto;
+  }
+  .logo span{ font-weight:700; font-size:12px; letter-spacing:0.3px; color:var(--accent); }
+  h1{ margin:0; font-size:18px; font-weight:700; letter-spacing:-0.2px; line-height:1.1; }
+  .sub{ margin-top:2px; font-size:11.5px; color:var(--text-3); }
+  .sub b{ color:var(--text-2); font-weight:600; }
+
+  /* Action row: keep original ids/classes, restyle as icon/segmented cluster */
+  .actions{
+    display:flex; align-items:center; gap:6px; flex-wrap:wrap; justify-content:flex-end;
+  }
+  .btn{
+    appearance:none; border:1px solid var(--border);
+    background:var(--surface); color:var(--text-2);
+    font-family:inherit; font-weight:600; font-size:12.5px;
+    padding:8px 12px; border-radius:var(--r-sm);
+    cursor:pointer; white-space:nowrap;
+    transition:border-color .15s ease, color .15s ease, background .15s ease;
+  }
+  .btn:hover{ color:var(--text); border-color:var(--border-strong); }
+  .btn:active{ transform:translateY(1px); }
+  .btn[disabled]{ opacity:0.5; cursor:not-allowed; }
+  .btn.ghost{ background:var(--surface); border:1px solid var(--border); color:var(--text-2); }
+  .btn.danger{ background:var(--danger-soft); border:1px solid var(--danger-border); color:var(--danger); }
+
+  .btn.viewBtn{ padding:8px 13px; }
+  .btn.viewBtn.active{ background:var(--accent-soft); border-color:var(--accent-border); color:var(--accent); }
+
+  .pill{
+    display:flex; align-items:center; gap:8px;
+    border:1px solid var(--border); background:var(--surface);
+    padding:8px 12px; border-radius:999px;
+  }
+  .dot{ width:7px;height:7px;border-radius:50%; background:var(--text-3); position:relative; flex:0 0 auto; }
+  .dot.ok{ background:var(--ok); }
+  .dot.ok::after{
+    content:""; position:absolute; inset:-4px; border-radius:50%;
+    border:1px solid var(--ok); opacity:0; animation:ring 2s ease-out infinite;
+  }
+  @keyframes ring{
+    0%{ opacity:.55; transform:scale(0.6); }
+    100%{ opacity:0; transform:scale(1.8); }
+  }
+  .dot.err{ background:var(--danger); }
+
+  .meta{ display:flex; gap:8px; align-items:center; color:var(--text-3); font-size:11px; margin-top:14px; font-family:'IBM Plex Mono',monospace; }
+
+  /* ---------- Segmented (Cards/Radar) + list ---------- */
+  .cards{ margin-top:14px; display:grid; gap:10px; }
+
+  .card{
+    background:var(--surface);
+    border:1px solid var(--border);
+    border-radius:var(--r-lg);
+    box-shadow:var(--sh-card);
+    padding:16px;
+    transition:border-color .15s ease;
+  }
+
+  .row{ display:flex; justify-content:space-between; align-items:flex-start; gap:10px; }
+
+  .flight{ font-weight:700; font-size:20px; letter-spacing:-0.2px; line-height:1.15; }
+  .airline{ font-size:12.5px; color:var(--text-2); margin-top:4px; }
+  .atype{ font-size:11.5px; color:var(--text-3); margin-top:1px; }
+  .small{ font-family:'IBM Plex Mono',monospace; font-size:10.5px; color:var(--text-3); margin-top:5px; letter-spacing:0.2px; }
+
+  .tagRow{ display:flex; gap:6px; flex-wrap:wrap; margin-top:12px; }
+  .tag{
+    display:inline-flex; align-items:center; gap:5px;
+    font-size:11.5px; font-weight:600; letter-spacing:0.1px;
+    padding:5px 10px; border-radius:999px;
+    border:1px solid var(--border); color:var(--text-2);
+    background:var(--surface-2);
+  }
+  .tag svg{ width:12px; height:12px; }
+  .tag.arriving{ color:var(--ok); background:var(--ok-soft); border-color:var(--ok-border); }
+  .tag.landing{ color:var(--accent); background:var(--accent-soft); border-color:var(--accent-border); }
+  .tag.tag-heavy{ color:var(--warn); background:var(--warn-soft); border-color:var(--warn-border); }
+  .tag.tag-runway.tag-runway-high{ color:var(--accent); background:var(--accent-soft); border-color:var(--accent-border); }
+  .tag.tag-runway.tag-runway-likely{ color:var(--warn); background:var(--warn-soft); border-color:var(--warn-border); }
+
+  .confidence{ margin-top:6px; height:3px; border-radius:2px; background:var(--surface-3); overflow:hidden; max-width:130px; }
+  .confidence i{ display:block; height:100%; background:var(--accent); border-radius:2px; }
+
+  .grid{
+    margin-top:14px; display:grid; grid-template-columns:repeat(5,1fr);
+    border-top:1px solid var(--border);
+  }
+  .chip{
+    background:transparent; border:0; border-right:1px solid var(--border);
+    border-radius:0; padding:10px 4px 0; text-align:center;
+  }
+  .chip:last-child{ border-right:0; }
+  .chip svg{ margin:0 auto 4px; color:var(--text-3); }
+  .k{ font-size:9px; color:var(--text-3); letter-spacing:0.08em; font-weight:600; text-transform:uppercase; }
+  .v{ font-size:14px; font-weight:600; color:var(--text); margin-top:4px; line-height:1; }
+
+  .cardBtns{ display:flex; gap:6px; flex:0 0 auto; }
+
+  .saveBtn, .spotBtn{
+    appearance:none; border:1px solid var(--border);
+    background:var(--surface-2); color:var(--text-3);
+    width:32px;height:32px; border-radius:var(--r-sm);
+    display:grid; place-items:center; cursor:pointer; flex:0 0 auto;
+    transition:all .15s ease;
+  }
+  .saveBtn:active, .spotBtn:active{ transform:translateY(1px); }
+  .saveBtn.saved{ color:var(--warn); background:var(--warn-soft); border-color:var(--warn-border); }
+  .spotBtn:hover{ color:var(--accent); border-color:var(--accent-border); }
+
+  .note{
+    margin-top:18px; padding:13px 15px;
+    border:1px solid var(--border); border-radius:var(--r-md);
+    color:var(--text-3); font-size:11.5px; line-height:1.6;
+  }
+  .note b{ color:var(--text-2); }
+
+  /* ---------- Spotting locations (rendered inside spotModal) ---------- */
+  .spotCards{ display:grid; gap:8px; }
+  .spotCard{
+    background:var(--surface); border:1px solid var(--accent-border);
+    border-radius:var(--r-md); padding:12px 14px;
+  }
+  .spotCard.secondary{
+    border-color:var(--border); opacity:0.75;
+  }
+  .spotCard .row{ display:flex; justify-content:space-between; align-items:baseline; gap:8px; }
+  .spotCard .name{ font-weight:700; font-size:14px; }
+  .spotCard .lens{ font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--accent); white-space:nowrap; }
+  .spotCard .notes{ margin-top:4px; font-size:12px; color:var(--text-3); line-height:1.5; }
+  .spotEmpty{
+    padding:12px 14px; border:1px dashed var(--border); border-radius:var(--r-md);
+    color:var(--text-3); font-size:12px;
+  }
+
+  .errbox{
+    margin-top:14px;
+    background:var(--danger-soft);
+    border:1px solid var(--danger-border);
+    padding:12px 14px; border-radius:var(--r-md);
+    color:var(--text); font-size:13px; display:none; white-space:pre-wrap;
+  }
+
+  @media (max-width:420px){
+    h1{ font-size:17px; }
+    .flight{ font-size:19px; }
+  }
+  @media (max-width:520px){
+    .top{ flex-wrap:wrap; }
+    .actions{ width:100%; justify-content:flex-start; }
+  }
+
+  /* ---------- Modals (Airport / Welcome / Saved) ---------- */
+  .modal{
+    position:fixed; inset:0; display:none;
+    align-items:flex-end; justify-content:center;
+    padding:0; background:rgba(4,5,7,0.7); backdrop-filter:blur(6px);
+    z-index:9999;
+  }
+  .modal.show{ display:flex; }
+  .modalCard{
+    width:min(480px,100%);
+    max-height:min(84vh,760px);
+    background:var(--surface-2);
+    border:1px solid var(--border-strong);
+    border-radius:20px 20px 0 0;
+    box-shadow:0 -20px 60px rgba(0,0,0,0.5);
+    overflow:hidden; display:flex; flex-direction:column;
+  }
+  @media (min-width:540px){
+    .modal{ align-items:center; }
+    .modalCard{ border-radius:18px; }
+  }
+  .modalHead{
+    flex:0 0 auto; display:flex; gap:12px; align-items:flex-start; justify-content:space-between;
+    padding:18px 18px 12px; border-bottom:1px solid var(--border);
+  }
+  .modalTitle{ font-weight:700; font-size:16px; letter-spacing:-0.1px; }
+  .modalSub{ margin-top:3px; color:var(--text-3); font-size:12.5px; }
+  .modalBody{ padding:14px 18px 16px; display:grid; gap:12px; overflow:auto; -webkit-overflow-scrolling:touch; }
+  .modalFoot{ flex:0 0 auto; display:flex; gap:10px; align-items:center; padding:14px 18px 20px; border-top:1px solid var(--border); }
+  .iconBtn{
+    width:32px;height:32px; border-radius:var(--r-sm);
+    border:1px solid var(--border); background:var(--surface); color:var(--text-2);
+    cursor:pointer; display:grid; place-items:center;
+  }
+  .iconBtn:hover{ background:var(--surface-3); color:var(--text); }
+  .fieldLabel{ font-size:11.5px; color:var(--text-3); font-weight:600; letter-spacing:0.04em; text-transform:uppercase; }
+  .fieldInput{
+    width:100%; padding:12px 13px; border-radius:var(--r-md);
+    border:1px solid var(--border); background:var(--surface); color:var(--text); outline:none;
+  }
+  .fieldInput:focus{ border-color:var(--accent-border); box-shadow:0 0 0 3px var(--accent-soft); }
+  .fieldDisplay{ cursor:default; user-select:none; }
+  .installBox{ border:1px solid var(--border); background:var(--surface); border-radius:var(--r-md); padding:13px; }
+  .installTitle{ font-weight:700; font-size:11.5px; margin-bottom:8px; color:var(--text-2); }
+  .installCols{ display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+  .installHdr{ font-size:12px; font-weight:700; }
+  .installTxt{ font-size:11.5px; color:var(--text-3); margin-top:2px; }
+  @media (max-width:520px){ .installCols{ grid-template-columns:1fr; } }
+
+  /* Airport picker */
+  .pickerList{
+    margin-top:10px; border:1px solid var(--border); border-radius:var(--r-md);
+    overflow:auto; max-height:min(280px,38vh); background:var(--surface);
+  }
+  .pickerItem{
+    width:100%; text-align:left; padding:12px 13px; border:0;
+    border-bottom:1px solid var(--border); background:transparent; color:var(--text);
+    cursor:pointer; display:flex; gap:10px; align-items:baseline;
+  }
+  .pickerItem:last-child{ border-bottom:0; }
+  .pickerItem:hover{ background:var(--surface-2); }
+  .pickerCode{ font-weight:700; letter-spacing:0.06em; font-size:13px; }
+  .pickerMeta{ color:var(--text-3); font-size:12.5px; }
+  .pickerItem[aria-selected="true"]{ background:var(--accent-soft); }
+  .pickerEmpty{ padding:14px; color:var(--text-3); font-size:13px; }
+
+  /* Saved shots */
+  .savedList{ padding:12px 16px; overflow:auto; }
+  .savedItem{
+    padding:13px 14px; border-radius:var(--r-md);
+    background:var(--surface); border:1px solid var(--border); margin-bottom:9px;
+  }
+  .savedTop{ display:flex; align-items:flex-start; justify-content:space-between; gap:10px; }
+  .savedCall{ font-weight:700; font-size:15px; letter-spacing:-0.1px; }
+  .savedWhen{ color:var(--text-3); font-size:11.5px; margin-top:2px; font-family:'IBM Plex Mono',monospace; }
+  .savedGrid{ margin-top:9px; display:grid; grid-template-columns:1fr 1fr; gap:7px 12px; color:var(--text-2); font-size:12.5px; }
+  .savedGrid b{ color:var(--text); font-weight:600; }
+  .savedActions{ display:flex; gap:8px; align-items:center; }
+  .tinyBtn{
+    padding:6px 11px; border-radius:999px; background:var(--surface-2);
+    border:1px solid var(--border); color:var(--text-2); font-weight:600; cursor:pointer; font-size:11.5px;
+  }
+  .tinyBtn:hover{ color:var(--text); border-color:var(--border-strong); }
+
+  /* ---------- Toast ---------- */
+  .toast{
+    position:fixed; left:50%; bottom:22px; transform:translate(-50%,20px);
+    background:var(--surface-3); border:1px solid var(--border-strong);
+    color:var(--text); padding:10px 16px; border-radius:var(--r-md);
+    font-weight:600; font-size:12.5px; display:none;
+    box-shadow:0 14px 30px rgba(0,0,0,0.5);
+    opacity:0; transition:all .22s ease; z-index:10000;
+  }
+  .toast.show{ display:block; opacity:1; transform:translate(-50%,0); }
+
+  /* ---------- Radar view (Leaflet) ---------- */
+  .radarWrap{ display:none; margin-top:14px; }
+  .radarWrap.show{ display:block; }
+  #radarMap{
+    width:100%; height:min(62vh,520px); border-radius:var(--r-lg);
+    overflow:hidden; border:1px solid var(--border); box-shadow:var(--sh-card);
+  }
+  .radarHint{ margin-top:10px; color:var(--text-3); font-size:12px; line-height:1.5; }
+  .acPlane{ width:18px; height:18px; transform-origin:50% 50%; filter:drop-shadow(0 2px 3px rgba(0,0,0,0.45)); opacity:0.95; color:var(--accent); }
+  .acLabel{
+    margin-top:2px; padding:2px 7px; border-radius:999px;
+    background:var(--surface-3); border:1px solid var(--border-strong);
+    color:var(--text); font-size:10.5px; font-weight:600; letter-spacing:0.02em; white-space:nowrap;
+    font-family:'IBM Plex Mono',monospace;
+  }
+  .aircraft-icon{ background:transparent !important; border:0 !important; }
+  .acIconContainer{ display:flex; flex-direction:column; align-items:center; gap:2px; }
+  .acWrap{ width:22px; height:22px; display:flex; align-items:center; justify-content:center; }
+  .acPng{ width:22px; height:22px; display:block; background:transparent !important; border:0 !important; box-shadow:none !important; filter:drop-shadow(0 1px 2px rgba(0,0,0,0.35)); }
+
+  @media (prefers-reduced-motion: reduce){
+    *{ animation-duration:0.001ms !important; transition-duration:0.001ms !important; }
+  }
+</style>
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+</head>
+<body>
+  <div class="wrap">
+    <div class="top">
+      <div class="brand">
+        <div class="logo" aria-hidden="true"><span>SL</span></div>
+        <div>
+          <h1>Shot Log</h1>
+          <div class="sub">Arriving Soon – <span id="aptName">Brisbane</span> (<span id="aptIcao">YBBN</span>) • <b>v0.4.46</b></div>
+        </div>
+      </div>
+
+      <div class="actions">
+        <button class="btn ghost" id="airportBtn" type="button">Airport</button>
+        <button class="btn ghost" id="savedBtn" type="button">Saved 0</button>
+        <button class="btn ghost viewBtn active" id="viewCardsBtn" type="button">Cards</button>
+        <button class="btn ghost viewBtn" id="viewRadarBtn" type="button">Radar</button>
+        <button class="btn" id="refreshBtn" type="button">Refresh</button>
+        <div class="pill" id="statusPill" title="Network status" role="status" aria-live="polite">
+          <div class="dot" id="statusDot" aria-hidden="true"></div>
+          <div id="statusText">Ready</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="meta">
+      <div>Last updated:</div>
+      <div id="lastUpdated">—</div>
+    </div>
+
+    <div id="errbox" class="errbox"></div>
+
+    
+  <!-- Welcome / Airport Modal -->
+  <div id="airportModal" class="modal" aria-hidden="true">
+    <div class="modalCard">
+      <div class="modalHead">
+        <div>
+          <div class="modalTitle">Choose an airport</div>
+          <div class="modalSub">Set your spot for arrivals. You can change this anytime.</div>
+        </div>
+        <button id="airportClose" class="iconBtn" type="button" aria-label="Close">✕</button>
+      </div>
+
+      <div class="modalBody">
+        <label class="fieldLabel" for="airportInput">Airport (ICAO)</label>
+        <!-- Modal picker (mobile-safe). Hidden input preserves existing logic -->
+        <input id="airportInput" type="hidden" />
+        <div id="airportSelectedDisplay" class="fieldInput fieldDisplay" tabindex="0" aria-label="Selected airport"></div>
+        <div id="airportPickerList" class="pickerList" role="listbox" aria-label="Airport picker list"></div>
+
+        <div class="installBox">
+          <div class="installTitle">Install on your phone (optional)</div>
+          <div class="installCols">
+            <div class="installCol">
+              <div class="installHdr">Android (Chrome)</div>
+              <div class="installTxt">Menu (⋮) → <b>Add to Home screen</b></div>
+            </div>
+            <div class="installCol">
+              <div class="installHdr">iPhone (Safari)</div>
+              <div class="installTxt">Share (□↑) → <b>Add to Home Screen</b></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="modalFoot">
+        <button id="airportUseDefault" class="btn ghost" type="button">Use Brisbane (YBBN)</button>
+        <div style="flex:1"></div>
+        <button id="airportApply" class="btn" type="button">Start spotting</button>
+      </div>
+    </div>
+  </div>
+
+      <div id="radarWrap" class="radarWrap" aria-label="Radar view">
+        <div id="radarMap" role="application" aria-label="Inbound radar map"></div>
+        <div class="radarHint">Shows the same inbound list as Cards, plotted top-down. Ring = 30 NM. Tap a marker for details.</div>
+      </div>
+
+
+      <div id="cards" class="cards"></div>
+
+    <div class="note" style="margin-top: 18px;">
+      <b>Rules:</b> ≤30NM, ≤12,000ft. Mid‑range (20–30NM): ≥160kt + not climbing. Short‑range (≤20NM): descending preferred (short‑final allowed) + ≥140kt. Very‑short‑final override: ≤6NM + ≤3,000ft + ≥100kt. Seen ≤90s. Max 10.<br/><br/>
+      Tip: this is live ADS‑B, not an official airport schedule. The goal is “what’s actually inbound right now”.
+    </div>
+  </div>
+
+
+
+  <div id="toast" class="toast"></div>
+
+  <!-- Best Spotting Position Modal (per-flight) -->
+  <div id="spotModal" class="modal" aria-hidden="true">
+    <div class="modalCard">
+      <div class="modalHead">
+        <div>
+          <div class="modalTitle">Best spotting position</div>
+          <div id="spotModalSub" class="modalSub">—</div>
+        </div>
+        <button id="spotModalClose" class="iconBtn" type="button" aria-label="Close">✕</button>
+      </div>
+      <div id="spotModalBody" class="modalBody"></div>
+    </div>
+  </div>
+
+  <!-- Saved Shots Modal -->
+  <div id="savedModal" class="modal" aria-hidden="true">
+    <div class="modalCard">
+      <div class="modalHead">
+        <div>
+          <div class="modalTitle">Saved shots</div>
+          <div id="savedMeta" class="modalSub">0 saved</div>
+        </div>
+        <button id="closeSavedBtn" class="btn ghost" type="button">Close</button>
+      </div>
+      <div id="savedList" class="savedList"></div>
+      <div class="modalFoot">
+        <button id="clearSavedBtn" class="btn danger" type="button">Clear all</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+(() => {
+  // ===== Config =====
+  const VERSION = '0.4.31';
+
+  
+  // Auto-refresh interval (ms). Set to 0 to disable.
+  const AUTO_REFRESH_MS = 10000;
+  let refreshInProgress = false;
+// If WordPress blocks .php uploads and you temporarily rename it to .ph1,
+  // set the proxy filename here to match what exists on the server.
+  // It will auto-fallback between proxy.php and proxy.php.
+  const PROXY_CANDIDATES = ['./proxy.php'];
+
+  // Airports (AU + NZ) – lightweight built-in list
+const AIRPORTS = [
+  { icao: "YBBN", name: "Brisbane", country: "AU", lat: -27.3842, lon: 153.1175 },
+  { icao: "YSSY", name: "Sydney", country: "AU", lat: -33.9399, lon: 151.1753 },
+  { icao: "YMML", name: "Melbourne", country: "AU", lat: -37.6733, lon: 144.8433 },
+  { icao: "YPPH", name: "Perth", country: "AU", lat: -31.9403, lon: 115.9672 },
+  { icao: "YPAD", name: "Adelaide", country: "AU", lat: -34.9450, lon: 138.5306 },
+  { icao: "YSCB", name: "Canberra", country: "AU", lat: -35.3069, lon: 149.1950 },
+  { icao: "YPDN", name: "Darwin", country: "AU", lat: -12.4147, lon: 130.8767 },
+  { icao: "YBCS", name: "Cairns", country: "AU", lat: -16.8858, lon: 145.7553 },
+  { icao: "YBCG", name: "Gold Coast", country: "AU", lat: -28.1644, lon: 153.5053 },
+  { icao: "YMHB", name: "Hobart", country: "AU", lat: -42.8361, lon: 147.5092 },
+  { icao: "YBNA", name: "Ballina", country: "AU", lat: -28.8339, lon: 153.5619 },
+  { icao: "YBNK", name: "Newcastle", country: "AU", lat: -32.7949, lon: 151.8337 },
+  { icao: "YBRK", name: "Rockhampton", country: "AU", lat: -23.3819, lon: 150.4753 },
+  { icao: "YBTL", name: "Townsville", country: "AU", lat: -19.2525, lon: 146.7653 },
+
+  { icao: "NZAA", name: "Auckland", country: "NZ", lat: -37.0082, lon: 174.7850 },
+  { icao: "NZWN", name: "Wellington", country: "NZ", lat: -41.3272, lon: 174.8050 },
+  { icao: "NZCH", name: "Christchurch", country: "NZ", lat: -43.4894, lon: 172.5322 },
+  { icao: "NZDN", name: "Dunedin", country: "NZ", lat: -45.9281, lon: 170.1983 },
+  { icao: "NZQN", name: "Queenstown", country: "NZ", lat: -45.0211, lon: 168.7392 },
+];
+
+
+// Runway headings for major AU/NZ airports (best-guess; used for approach runway prediction)
+// Headings are approximate degrees (0-359) and include L/R where applicable.
+const RUNWAYS = {
+  // Australia
+  YBBN: [
+    // Brisbane has two parallel N/S runways.
+    // Eastern runway: 01R/19L, Western runway: 01L/19R.
+    // Threshold coordinates from SkyVector (approx):
+    // 19L thr: S27°22.48' E153°8.06'  | 19R thr: S27°21.39' E153°7.32'
+    // 01R thr: S27°24.17' E153°7.09' | 01L thr: S27°22.98' E153°6.41'
+    { name: "01L", heading: 10,  thrLat: -27.3830000, thrLon: 153.1068333 },
+    { name: "01R", heading: 10,  thrLat: -27.4028333, thrLon: 153.1181667 },
+    { name: "19L", heading: 190, thrLat: -27.3746667, thrLon: 153.1343333 },
+    { name: "19R", heading: 190, thrLat: -27.3565000, thrLon: 153.1220000 },
+  ],
+  YSSY: [
+    { name: "16L", heading: 160 }, { name: "34R", heading: 340 },
+    { name: "16R", heading: 160 }, { name: "34L", heading: 340 },
+  ],
+  YMML: [
+    { name: "09", heading: 90 }, { name: "27", heading: 270 },
+    { name: "16", heading: 160 }, { name: "34", heading: 340 },
+  ],
+  YPPH: [
+    { name: "03", heading: 30 }, { name: "21", heading: 210 },
+    { name: "06", heading: 60 }, { name: "24", heading: 240 },
+  ],
+  YPAD: [
+    { name: "05", heading: 50 }, { name: "23", heading: 230 },
+  ],
+  YSCB: [
+    { name: "17", heading: 170 }, { name: "35", heading: 350 },
+    { name: "12", heading: 120 }, { name: "30", heading: 300 },
+  ],
+  YPDN: [
+    { name: "11", heading: 110 }, { name: "29", heading: 290 },
+  ],
+  // New Zealand
+  NZAA: [
+    { name: "05L", heading: 50 }, { name: "23R", heading: 230 },
+    { name: "05R", heading: 50 }, { name: "23L", heading: 230 },
+  ],
+  NZWN: [
+    { name: "16", heading: 160 }, { name: "34", heading: 340 },
+  ],
+  NZCH: [
+    { name: "02", heading: 20 }, { name: "20", heading: 200 },
+    { name: "11", heading: 110 }, { name: "29", heading: 290 },
+  ],
+  NZDN: [
+    { name: "03", heading: 30 }, { name: "21", heading: 210 },
+  ],
+  NZQN: [
+    { name: "05", heading: 50 }, { name: "23", heading: 230 },
+  ],
+};
+
+// Heuristic reference point used for earlier 01L/01R prediction at Brisbane (YBBN).
+// Archerfield Airport (YBAF) is a reliable east/west divider for southern arrivals.
+// (Used only as a geographic reference — this does not fetch any external data.)
+const ARCHERFIELD = { lat: -27.5706, lon: 153.0075 };
+// Amberley exclusion zone (Brisbane only): prevent YAMB traffic (e.g., C-17s) from appearing as Brisbane inbound.
+// Small, explainable geo-fence:
+// - Only when selected airport is YBBN
+// - Exclude aircraft inside a tight bubble around Amberley AND still well away from Brisbane
+// - Optional SW wedge from Brisbane (~235°) as an extra safety guard
+const AMBERLEY = { icao: 'YAMB', name: 'Amberley', lat: -27.6354, lon: 152.7112 };
+const AMBERLEY_EXCLUSION = {
+  bubbleNm: 12,          // within 12 NM of Amberley
+  brisbaneSafeMinNm: 18, // never exclude anything inside 18 NM of Brisbane
+  wedgeBearingDeg: 235,  // Amberley is SW of Brisbane
+  wedgeHalfWidthDeg: 20, // +/- 20° wedge
+};
+
+// ===== Spotting locations (Phase 1: static data, no sun/weather yet) =====
+// runways: [] means "not runway-specific" (e.g. apron/static shots).
+// status: 'open' | 'closed' | 'temporary' — lets a spot be pulled from matching
+// without deleting it, e.g. while Acacia Loop is mid-relocation.
+const SPOTS_YBBN = [
+  {
+    name: "Acacia Loop",
+    lat: -27.376755, lon: 153.127653,
+    runways: ["19L", "19R", "01R"],
+    style: "both",
+    lens: "120-400mm",
+    notes: "19L touchdowns + 01R departures, both over the bay. If it's 19R instead, this is more of a taxi/crossing shot than a touchdown.",
+    status: "open", // reopened
+  },
+  {
+    name: "Boronia Road",
+    lat: -27.415621, lon: 153.105559,
+    runways: ["01R"],
+    style: "arriving",
+    lens: "120-400mm",
+    notes: "Close final approach, undercarriage detail. Businesses nearby — be mindful.",
+    status: "open",
+  },
+  {
+    name: "Logistics Apron",
+    lat: -27.418334, lon: 153.100835,
+    runways: [],
+    style: "static",
+    lens: "28-300mm",
+    notes: "Parked aircraft, not runway-specific.",
+    status: "open",
+  },
+  {
+    name: "Lomandra Drive",
+    lat: -27.420584, lon: 153.096029,
+    runways: ["01L", "01R"],
+    style: "both",
+    lens: "120-400mm",
+    notes: "01L primary line, 01R visible wider-angle.",
+    status: "open",
+  },
+  {
+    name: "Lakeside Drive",
+    lat: -27.414814, lon: 153.088359,
+    runways: ["01L"],
+    style: "arriving",
+    lens: "28-300mm",
+    notes: "Secondary 01L approach spot, wider than Boronia.",
+    status: "open",
+  },
+  {
+    name: "The Blvd",
+    lat: -27.419088, lon: 153.080280,
+    runways: ["01L"],
+    style: "arriving",
+    lens: "120-400mm",
+    notes: "Wide, over-the-city scenic shot on 01L final.",
+    status: "open",
+  },
+  {
+    name: "Dryandra Road",
+    lat: -27.373357, lon: 153.120694,
+    runways: ["01L", "01R", "19L", "19R"],
+    style: "ground",
+    lens: "28-300mm",
+    notes: "Crossover point between both runways. You may be asked to move on by ISS.",
+    status: "open",
+  },
+  {
+    name: "Level 9, P2 carpark",
+    lat: -27.382995, lon: 153.118067,
+    runways: ["01L", "01R", "19L", "19R"],
+    style: "both",
+    lens: "120-400mm",
+    notes: "Elevated views of both runways. Costs to park.",
+    status: "open",
+  },
+];
+
+const SPOTS_BY_ICAO = { YBBN: SPOTS_YBBN };
+
+// A spot is "dedicated" to a runway if its style is actually about watching that runway
+// (arriving/landing/both) rather than incidental visibility (ground crossover, static apron).
+// Crossover/apron spots often technically see every runway, but that's not the same as
+// being the *best* place to watch one — dedicated spots should always rank first.
+function isDedicatedSpot(s) {
+  return s.style === 'arriving' || s.style === 'landing' || s.style === 'both';
+}
+
+// True if a spot serves this runway — either an exact match (e.g. "01L"), or, when
+// runwayName has no L/R suffix (a "family" guess like "19" — used when we know it's a
+// north-side arrival but can't yet tell which specific parallel runway), any spot that
+// covers either side of that family.
+function spotServesRunway(spot, runwayName) {
+  if (!runwayName) return false;
+  if (spot.runways.includes(runwayName)) return true;
+  if (/^\d+$/.test(runwayName)) return spot.runways.some(r => r.startsWith(runwayName));
+  return false;
+}
+
+function bestSpotsForRunway(icao, runwayName) {
+  const allSpots = SPOTS_BY_ICAO[(icao || '').toUpperCase()] || [];
+  if (!runwayName) return { matches: [], missingPrimary: null };
+
+  const matches = allSpots
+    .filter(s => s.status === 'open' && spotServesRunway(s, runwayName))
+    .sort((a, b) => (isDedicatedSpot(b) ? 1 : 0) - (isDedicatedSpot(a) ? 1 : 0));
+
+  // If the best (dedicated, currently-closed) spot for this runway isn't in the open
+  // results, surface that gap explicitly rather than silently recommending a lesser spot.
+  const openDedicatedNames = new Set(matches.filter(isDedicatedSpot).map(s => s.name));
+  const missingPrimary = allSpots.find(s =>
+    s.status !== 'open' && isDedicatedSpot(s) && spotServesRunway(s, runwayName) && !openDedicatedNames.has(s.name)
+  ) || null;
+
+  return { matches, missingPrimary };
+}
+
+function shouldExcludeAmberleyTraffic(p, dToAptNm) {
+  try {
+    const aptIcao = (APT && APT.icao) ? String(APT.icao).toUpperCase() : '';
+    if (aptIcao !== 'YBBN') return false;
+
+    if (!p || typeof p.lat !== 'number' || typeof p.lon !== 'number') return false;
+    const dToAmberley = distNM(p.lat, p.lon, AMBERLEY.lat, AMBERLEY.lon);
+    if (!(dToAmberley <= AMBERLEY_EXCLUSION.bubbleNm)) return false;
+
+    // dToAptNm is distance to Brisbane (APT). If we don't have it, compute.
+    const dToBrisbane = (typeof dToAptNm == 'number' && isFinite(dToAptNm)) ? dToAptNm : distNM(p.lat, p.lon, APT.lat, APT.lon);
+    if (dToBrisbane < AMBERLEY_EXCLUSION.brisbaneSafeMinNm) return false;
+
+    const brgFromBrisbane = bearingDeg(APT.lat, APT.lon, p.lat, p.lon);
+    const diff = angleDiff(brgFromBrisbane, AMBERLEY_EXCLUSION.wedgeBearingDeg);
+    if (diff > AMBERLEY_EXCLUSION.wedgeHalfWidthDeg) return false;
+
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+
+// Runway lock cache: once a runway becomes high-confidence, keep it fixed for that aircraft
+// so the UI does not flip from 'locked' (purple) to 'guess' (orange) near the threshold.
+const runwayLockCache = new Map();
+
+function getRunwayCacheKey(p) {
+  return (p && (p.hex || p.icao24 || p.reg || p.callsign || p.flight || p.id)) || '';
+}
+
+function pruneRunwayLockCache(activeKeys) {
+  const now = Date.now();
+  const TTL_MS = 20 * 60 * 1000; // 20 minutes
+  for (const [k, v] of runwayLockCache.entries()) {
+    if (!k) { runwayLockCache.delete(k); continue; }
+    if (activeKeys && !activeKeys.has(k) && (now - (v.ts || 0)) > TTL_MS) {
+      runwayLockCache.delete(k);
+    }
+  }
+}
+
+
+function angleDiffDeg(a, b) {
+  const d = ((a - b + 540) % 360) - 180;
+  return Math.abs(d);
+}
+
+// Broader fallback for the spotting popup only (never the RWY chip): the precise
+// cross-track match above requires the aircraft to already be reasonably close to one of
+// the two extended centerlines, which isn't true while it's still on a STAR/vector routing
+// in from a direction that doesn't run straight down the bay (e.g. via Caboolture, or via
+// Point Lookout/Moreton Island). This uses a relative check instead of an absolute heading
+// window — "closer to a 19 approach than a 01 approach" — which holds up across a much
+// wider range of pre-final headings, and doesn't need to guess which specific side.
+function estimateNorthFamilyEarly(it) {
+  try {
+    const icao = (APT && APT.icao) ? String(APT.icao).toUpperCase() : '';
+    if (icao !== 'YBBN' || !APT || typeof APT.lat !== 'number' || typeof APT.lon !== 'number') return null;
+
+    const dnm = it._dist_nm;
+    if (!(typeof dnm === 'number' && dnm <= 30)) return null;
+
+    const lat0 = (typeof it.lat === 'number') ? it.lat : null;
+    const lon0 = (typeof it.lon === 'number') ? it.lon : null;
+    let track = (typeof it.track === 'number') ? it.track : ((typeof it.trk === 'number') ? it.trk : null);
+    if (lat0 == null || lon0 == null || !Number.isFinite(lat0) || !Number.isFinite(lon0)) return null;
+    if ((track == null || !Number.isFinite(track))) {
+      track = bearingDeg(lat0, lon0, APT.lat, APT.lon);
+    }
+    if (track == null || !Number.isFinite(track)) return null;
+
+    // Must be meaningfully closing on the field, not just transiting past it.
+    const brgToApt = bearingDeg(lat0, lon0, APT.lat, APT.lon);
+    const towardCos = Math.cos(angleDiffDeg(track, brgToApt) * Math.PI / 180);
+    if (towardCos < 0.15) return null;
+
+    // Relative comparison, not an absolute tolerance — closer to a southbound (190°)
+    // approach than a northbound (010°) one.
+    if (angleDiffDeg(track, 190) >= angleDiffDeg(track, 10)) return null;
+
+    return { name: '19', level: 'estimate' };
+  } catch (e) {
+    return null;
+  }
+}
+
+function predictRunwayForAircraft(it) {
+  try {
+    const icao = (APT && APT.icao) ? String(APT.icao).toUpperCase() : '';
+    const rwys = RUNWAYS[icao];
+    if (!rwys || !rwys.length) return null;
+
+    let track = (typeof it.track === 'number') ? it.track : ((typeof it.trk === 'number') ? it.trk : null);
+    // Some feeds omit track/heading. If we have position, approximate track as bearing toward the airport.
+    const lat0 = (typeof it.lat === 'number') ? it.lat : null;
+    const lon0 = (typeof it.lon === 'number') ? it.lon : null;
+    if ((track == null || !Number.isFinite(track)) && lat0 != null && lon0 != null && Number.isFinite(lat0) && Number.isFinite(lon0) && APT && typeof APT.lat === 'number' && typeof APT.lon === 'number') {
+      track = bearingDeg(lat0, lon0, APT.lat, APT.lon);
+    }
+    if (track == null || !Number.isFinite(track)) return null;
+
+    const dnm = it._dist_nm;
+    // Direction-of-travel sanity check: avoid predicting the reciprocal runway when the aircraft is on downwind/base
+    // (e.g., tracking along the coast away/sideways from the airport). We only show a runway when motion is generally
+    // toward the airport, unless we're very close-in.
+    let towardAirportCos = null;
+    if (lat0 != null && lon0 != null && Number.isFinite(lat0) && Number.isFinite(lon0) && typeof APT.lat === 'number' && typeof APT.lon === 'number') {
+      const brgToApt = bearingDeg(lat0, lon0, APT.lat, APT.lon);
+      const angToApt = angleDiffDeg(track, brgToApt);
+      towardAirportCos = Math.cos(angToApt * Math.PI / 180);
+      if (typeof dnm === 'number' && dnm > 8 && towardAirportCos < 0.20) return null; // not meaningfully moving toward the field
+    }
+
+    // We can only make earlier runway guesses if we have position. Otherwise keep the old close-in behavior.
+    // Special case: Brisbane (YBBN) southern arrivals — use Archerfield (YBAF) as an east/west divider so we can
+    // label 01L/01R earlier than the tight 10nm window. This is ONLY applied when the aircraft is south of YBBN
+    // and generally moving toward the airport.
+    // Archerfield split rule: when SOUTH of BNE and inbound, use Archerfield as a divider.
+    // This must work even when close-in (e.g. 3–10nm) because the default runway logic
+    // can stay on 01L until very late for some approach angles.
+    if (typeof dnm === 'number' && dnm >= 2) {
+      if (
+        icao === 'YBBN' &&
+        lat0 != null && lon0 != null &&
+        Number.isFinite(lat0) && Number.isFinite(lon0) &&
+        APT && typeof APT.lat === 'number' && typeof APT.lon === 'number' &&
+        // South-side arrivals can still be only slightly south/east of the field until late.
+        // Use a generous "south-of-BNE" gate (a few NM north of the airport) so we can
+        // call 01R/01L early using Archerfield as the divider.
+        lat0 < (APT.lat + 0.05) &&
+        // Not too far out (keeps this “planning hint” local)
+        dnm <= 30 &&
+        // Must be meaningfully moving toward the airport (cos>~0.2 handled above; we also require not-away)
+        (towardAirportCos == null || towardAirportCos > 0.10)
+      ) {
+        // East of Archerfield => 01R, West => 01L
+        const side = (lon0 > ARCHERFIELD.lon) ? '01R' : '01L';
+        return { runway: side, level: 'likely+' };
+      }
+      // No unconditional return here — fall through to the general cross-track logic below,
+      // which compares actual position against each candidate runway's own extended
+      // centerline (not just a heading check). Over Moreton Bay the 19L and 19R centerlines
+      // are genuinely several NM apart, so that comparison can distinguish them well before
+      // 2NM — it just needs to actually run at this distance, which it previously couldn't.
+    }
+
+    let bestHeading = null;
+    let bestDiff = Infinity;
+    let level = 'likely';
+
+    for (const r of rwys) {
+      const diff = angleDiffDeg(track, r.heading);
+      if (diff < bestDiff) { bestDiff = diff; bestHeading = r.heading; }
+    }
+    if (bestHeading == null || bestDiff > 35) return null;
+
+    // Position-based "Likely+" gating (predict earlier than final by using extended centerline geometry)
+    const lat = (typeof it.lat === 'number') ? it.lat : null;
+    const lon = (typeof it.lon === 'number') ? it.lon : null;
+
+    let fx = null, fy = null, lx = null, ly = null, side = 0;
+
+    if (lat != null && lon != null && Number.isFinite(lat) && Number.isFinite(lon)) {
+      const rad = Math.PI / 180;
+
+      // Approximate local ENU meters from airport reference point
+      const dLat = (lat - APT.lat) * rad;
+      const dLon = (lon - APT.lon) * rad;
+      const mPerRad = 6371000;
+      const x = dLon * Math.cos(APT.lat * rad) * mPerRad; // east (+)
+      const y = dLat * mPerRad; // north (+)
+
+      const hdg = bestHeading * rad;
+      fx = Math.sin(hdg);
+      fy = Math.cos(hdg);
+      // Left-hand unit vector (90° CCW)
+      lx = -fy;
+      ly = fx;
+
+      // Geometry metrics in NM (extended centerline through airport)
+      const alongM = (x * fx + y * fy);
+      const approachAlongNm = (-alongM) / 1852; // positive when aircraft is "in front" of runway end (on approach side)
+      const crossNm = Math.abs(x * lx + y * ly) / 1852;
+      side = (x * lx + y * ly); // sign only
+
+      // "Likely+" rule:
+      // - aircraft is on the approach side (in front of runway end)
+      // - not wildly offset from extended centerline
+      // - reasonably aligned with runway heading
+      // - and within 30NM
+      const aligned = bestDiff <= 28;
+      const onApproachSide = approachAlongNm > 1.5;
+      const nearCenterline = crossNm <= 6;
+
+      const closeInFallback = (typeof dnm === 'number' && dnm <= 20 && bestDiff <= 35);
+
+      if (!( (aligned && onApproachSide && nearCenterline) || closeInFallback )) return null;
+
+      // Upgrade to HIGH confidence when close & tightly aligned
+      const highRaw = (typeof dnm === 'number' && dnm <= 12 && bestDiff <= 18 && crossNm <= 3 && onApproachSide) ||
+                   (typeof dnm === 'number' && dnm <= 6 && bestDiff <= 25);
+      const high = highRaw && (towardAirportCos == null || towardAirportCos >= 0.55);
+      if (high) level = 'high';
+    } else {
+      // No position -> only predict close-in (previous behavior)
+      if (typeof dnm === 'number' && dnm > 20) return null;
+      // We already checked bestDiff <= 35 above
+      if (typeof dnm === 'number' && dnm <= 8 && bestDiff <= 18) level = 'high';
+    }
+
+    // If we have a single runway for this heading, return it.
+    const candidates = rwys.filter(r => r.heading === bestHeading);
+    if (candidates.length === 1) return { name: candidates[0].name, level };
+
+    // For parallel runways (L/R), prefer the centerline that the aircraft is actually closest to.
+    // If we have runway threshold coords, compute cross-track to each extended centerline; otherwise fall back to side-of-airport.
+    const hasL = candidates.some(c => /L$/i.test(c.name));
+    const hasR = candidates.some(c => /R$/i.test(c.name));
+    if (hasL && hasR) {
+      const lat = (typeof it.lat === 'number') ? it.lat : null;
+      const lon = (typeof it.lon === 'number') ? it.lon : null;
+
+      const haveThr = candidates.every(c => typeof c.thrLat === 'number' && typeof c.thrLon === 'number');
+      if (haveThr && lat != null && lon != null && Number.isFinite(lat) && Number.isFinite(lon)) {
+        const rad = Math.PI / 180;
+        const mPerRad = 6371000;
+
+        // Shared local frame (east/north meters) so L/R comparisons are consistent.
+        const refLat = (APT && typeof APT.lat === 'number') ? APT.lat : candidates[0].thrLat;
+        const refLon = (APT && typeof APT.lon === 'number') ? APT.lon : candidates[0].thrLon;
+
+        function toXY(latIn, lonIn) {
+          const dLat = (latIn - refLat) * rad;
+          const dLon = (lonIn - refLon) * rad;
+          const x = dLon * Math.cos(refLat * rad) * mPerRad; // east (+)
+          const y = dLat * mPerRad; // north (+)
+          return { x, y };
+        }
+
+        const p = toXY(lat, lon);
+
+        // Choose the runway with smallest cross-track to its extended centerline,
+        // preferring those on the approach side.
+        let best = null;
+        let bestCross = Infinity;
+
+        for (const c of candidates) {
+          const thr = toXY(c.thrLat, c.thrLon);
+          const dx = p.x - thr.x;
+          const dy = p.y - thr.y;
+
+          const hdg = (c.heading || bestHeading) * rad;
+          const fx = Math.sin(hdg);
+          const fy = Math.cos(hdg);
+
+          // cross-track distance to centerline (meters)
+          const crossM = Math.abs(dx * fy - dy * fx);
+          const alongM = (dx * fx + dy * fy);
+
+          const crossNm = crossM / 1852;
+          const approachAlongNm = (-alongM) / 1852; // positive when in front (approach side)
+
+          // Must be plausibly on approach side, but allow small negatives (vectors/base turns).
+          const onApproachSide = approachAlongNm > -0.5;
+
+          if (onApproachSide && crossNm < bestCross) {
+            bestCross = crossNm;
+            best = c;
+          }
+        }
+
+        if (best) return { name: best.name, level };
+      }
+
+      // Fallback heuristic: pick based on which side of the airport the aircraft is on relative to runway direction.
+      const want = side > 0 ? 'L' : 'R';
+      const picked = candidates.find(c => new RegExp(want + '$', 'i').test(c.name));
+      if (picked) return { name: picked.name, level };
+    }
+
+    return { name: candidates[0].name, level };
+  } catch { return null; }
+}
+
+
+const AIRPORT_STORE_KEY = "photolog_airport_v1";
+const DEFAULT_APT = AIRPORTS[0]; // YBBN
+
+function loadAirport() {
+  try {
+    const raw = localStorage.getItem(AIRPORT_STORE_KEY);
+    if (!raw) return null;
+    const o = JSON.parse(raw);
+    if (!o || typeof o !== "object") return null;
+    if (typeof o.lat !== "number" || typeof o.lon !== "number") return null;
+    if (!o.icao) return null;
+    return o;
+  } catch { return null; }
+}
+
+function saveAirport(apt) {
+  try { localStorage.setItem(AIRPORT_STORE_KEY, JSON.stringify(apt)); } catch {}
+}
+
+function findAirportByIcao(icao) {
+  const c = (icao || "").trim().toUpperCase();
+  return AIRPORTS.find(a => a.icao === c) || null;
+}
+
+let APT = loadAirport() || DEFAULT_APT;
+
+function updateAirportHeader() {
+  const $name = document.getElementById("aptName");
+  const $icao = document.getElementById("aptIcao");
+  if ($name) $name.textContent = APT.name || APT.icao || "Airport";
+  if ($icao) $icao.textContent = APT.icao || "";
+}
+
+  let APP_STARTED = false;
+
+  const LIMITS = {
+    maxNM: 30,
+    maxAltFt: 12000,
+    seenSec: 90,
+    maxResults: 10,
+  };
+
+  const RULES = {
+    midMinNM: 20,
+    midMinKt: 160,
+    // Was 140 — too high. A jet that's begun decelerating for landing (flaps/gear) can be
+    // legitimately in the 110-140kt range while still 6-10NM out on a long straight-in
+    // (e.g. the over-the-bay approach), which is faster than very-short-final's 100kt floor
+    // but slower than this band previously allowed — a real aircraft could fall through
+    // that gap and vanish from the list while still genuinely inbound.
+    shortMinKt: 115,
+    veryShortNM: 6,
+    veryShortMaxAltFt: 3000,
+    veryShortMinKt: 100,
+    // heading tolerances
+    // NOTE: these were previously 180, which is a no-op (angle-diff between two
+    // directions is mathematically capped at 180, so "> 180" can never be true).
+    // That silently disabled the "flying away" filter past 6NM. 110 means: past
+    // 6NM, an aircraft whose track is more than 110 degrees off the bearing to
+    // the airport gets excluded (mid-range keeps a strong-descent exception below
+    // for legitimate vectoring/downwind arrivals).
+    midMaxHeadingDiffDeg: 110,
+    shortMaxHeadingDiffDeg: 110,
+    veryShortMaxHeadingDiffDeg: 75,
+    // How committed a descent must be, for an off-heading mid-range aircraft, before we
+    // assume it's a jet being vectored toward arrival rather than a GA aircraft that's
+    // just gently losing altitude mid-cruise on an unrelated route.
+    midVectorMinDescentFpm: -500,
+    // Short-range turn-onto-final allowance: a jet joining final over water/the bay can be
+    // legitimately off-heading mid-turn even inside 20NM. We don't require a steep descent
+    // here (short range already implies "probably genuine") — just that it isn't actively
+    // climbing away, which is what actually separates a turning arrival from a departure.
+    shortVectorMaxClimbFpm: 250,
+    // Sanity check: an aircraft already down at circuit/pattern altitude while still far
+    // from the selected airport almost certainly isn't inbound *here* — a normal descent
+    // is roughly 300ft per NM (3-degree glideslope), so being this low this far out means
+    // it's more likely established in the pattern at a different, nearby field.
+    tooLowMinDistNm: 10,
+    tooLowMaxAltFt: 1500,
+    // climb guard
+    maxClimbFpm: 350,
+    veryShortMaxClimbFpm: 300,
+  };
+
+  // ===== DOM =====
+  const $cards = document.getElementById('cards');
+  const $radarWrap = document.getElementById('radarWrap');
+  const $viewCardsBtn = document.getElementById('viewCardsBtn');
+  const $viewRadarBtn = document.getElementById('viewRadarBtn');
+
+  // ===== View state =====
+  let VIEW_MODE = 'cards';
+
+  // ===== Radar (Leaflet) =====
+  let radarMap = null;
+  let radarMarkers = new Map(); // key -> L.Marker
+  let radarRing = null;
+  let radarCenter = null;
+
+  function setViewMode(mode) {
+    VIEW_MODE = (mode === 'radar') ? 'radar' : 'cards';
+
+    if ($viewCardsBtn) $viewCardsBtn.classList.toggle('active', VIEW_MODE === 'cards');
+    if ($viewRadarBtn) $viewRadarBtn.classList.toggle('active', VIEW_MODE === 'radar');
+
+    if ($cards) $cards.style.display = (VIEW_MODE === 'cards') ? '' : 'none';
+    if ($radarWrap) $radarWrap.classList.toggle('show', VIEW_MODE === 'radar');
+
+    if (VIEW_MODE === 'radar') {
+      ensureRadarMap();
+      try { updateRadar(CURRENT_LIST || []); } catch (e) {}
+    }
+  }
+
+  function ensureRadarMap() {
+    if (radarMap || !$radarWrap) return;
+    if (typeof window.L === 'undefined') {
+      // Leaflet didn't load; fail open
+      $radarWrap.innerHTML = '<div class="note"><b>Radar unavailable</b><br/>Map library failed to load. Use Cards view.</div>';
+      return;
+    }
+
+    const center = [APT.lat, APT.lon];
+    radarMap = L.map('radarMap', {
+      zoomControl: true,
+      attributionControl: true,
+      preferCanvas: true
+    }).setView(center, 9);
+
+    // OSM tiles (free). Satellite tiles usually require paid providers.
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 15,
+      minZoom: 5,
+      attribution: '&copy; OpenStreetMap contributors'
+    }).addTo(radarMap);
+
+    // 30nm ring around selected airport
+    radarRing = L.circle(center, {
+      radius: 30 * 1852,
+      weight: 2,
+      color: '#ff8a1f',
+      fillColor: '#ff8a1f',
+      fillOpacity: 0.06
+    }).addTo(radarMap);
+
+    radarCenter = L.circleMarker(center, {
+      radius: 5,
+      weight: 2,
+      color: '#ffffff',
+      fillColor: '#000000',
+      fillOpacity: 0.2
+    }).addTo(radarMap);
+  }
+
+  function radarRecenter() {
+    if (!radarMap) return;
+    const center = [APT.lat, APT.lon];
+    radarMap.setView(center, Math.max(radarMap.getZoom(), 8));
+    if (radarRing) radarRing.setLatLng(center);
+    if (radarCenter) radarCenter.setLatLng(center);
+  }
+
+  function makeAircraftIcon(label, headingDeg, typeCode) {
+    const rot = (typeof headingDeg === 'number' && isFinite(headingDeg)) ? headingDeg : 0;
+    const safe = escapeHtml(label);
+
+    // Choose PNG based on aircraft type (fallback to 'all')
+    const tcRaw = (typeCode || '').toString().trim().toUpperCase();
+    let fn = 'all.png';
+    if (tcRaw === 'A388' || tcRaw.startsWith('A38')) fn = 'a380.png';
+    else if (tcRaw.startsWith('B74') || tcRaw === 'B744' || tcRaw === 'B748') fn = '747.png';
+
+    // Icon pixel size (A380 slightly bigger)
+    let iconSize = 54;
+
+// A380 – largest
+if (fn === 'a380.png') {
+  iconSize = 60;
+}
+// 747 – slightly smaller than A380
+else if (fn === '747.png') {
+  iconSize = 57;
+}
+
+    // Use relative path so it works on your domain: /photo-log/icons/aircraft/*.png
+    // Cache-bust to avoid mobile caching issues
+    const __v = (typeof window !== 'undefined' && (window.APP_VERSION || window.appVersion)) ? (window.APP_VERSION || window.appVersion) : '0';
+    const src = `/photo-log/icons/aircraft/${fn}?v=${encodeURIComponent(__v)}`;
+
+    const html = `
+      <div class="acIconContainer">
+        <div class="acWrap" style="transform: rotate(${rot}deg);">
+          <img class="acPng" src="${src}" alt="" />
+        </div>
+        <div class="acLabel">${safe}</div>
+      </div>
+    `;
+
+    return L.divIcon({
+      className: 'aircraft-icon',
+      html,
+      iconSize: [iconSize, iconSize],
+      iconAnchor: [iconSize/2, iconSize/2]
+    });
+  }
+
+  function updateRadar(list) {
+    if (VIEW_MODE !== 'radar') return;
+    ensureRadarMap();
+    if (!radarMap || typeof window.L === 'undefined') return;
+
+    const keep = new Set();
+
+    for (const it of (list || [])) {
+      const lat = it.lat;
+      const lon = it.lon;
+      if (typeof lat !== 'number' || typeof lon !== 'number') continue;
+
+      const key = getRunwayCacheKey(it) || it.hex || it.r || it.flight || `${lat},${lon}`;
+      keep.add(key);
+
+      // Heading: prefer track; fallback to bearing toward airport
+      let hdg = (typeof it.track === 'number' && isFinite(it.track)) ? it.track : null;
+      if (hdg == null) {
+        hdg = bearingDeg(lat, lon, APT.lat, APT.lon);
+      }
+
+      const label = (it.flight || it.r || it.t || it.hex || '—').toString().trim() || '—';
+
+      const typeCode = (it.t || it.type || it.icao_type || it.ac_type || it.aircraft_type || '').toString().trim();
+      const icon = makeAircraftIcon(label, hdg, typeCode);
+      let m = radarMarkers.get(key);
+      if (!m) {
+        m = L.marker([lat, lon], { icon, keyboard: false });
+        m.addTo(radarMap);
+        radarMarkers.set(key, m);
+      } else {
+        m.setLatLng([lat, lon]);
+        m.setIcon(icon);
+      }
+
+      const dnm = (typeof it._dist_nm === 'number' && isFinite(it._dist_nm)) ? it._dist_nm : null;
+      const alt = ft(it.alt_baro ?? it.alt_geom);
+      const gs = kt(it.gs);
+      const tip = `${label}${dnm != null ? ` • ${dnm.toFixed(1)}nm` : ''}${alt != null ? ` • ${alt}ft` : ''}${gs != null ? ` • ${gs}kt` : ''}`;
+      m.bindTooltip(tip, { permanent: false, direction: 'top' });
+
+      // Click popup: show carrier + details (matches your "who is this?" need)
+      const airline = airlineNameFromFlight(label);
+      const typePretty = aircraftTypePretty(typeCode);
+      const safeLabel = escapeHtml(label);
+      const safeAir = escapeHtml(airline || '');
+      const safeType = escapeHtml(typePretty || '');
+      const popup = `
+        <div style="min-width:180px;">
+          <div style="font-weight:900; font-size:14px; letter-spacing:0.02em;">${safeLabel}</div>
+          <div style="opacity:0.9; margin-top:2px;">${safeAir}</div>
+          ${safeType ? `<div style="opacity:0.75; margin-top:2px;">${safeType}</div>` : ''}
+          <div style="opacity:0.85; margin-top:6px; font-weight:700;">
+            ${dnm != null ? `${dnm.toFixed(1)} nm` : '—'}
+            ${alt != null ? ` · ${alt} ft` : ''}
+            ${gs != null ? ` · ${gs} kt` : ''}
+          </div>
+        </div>`;
+
+      if (m.getPopup && m.getPopup()) {
+        m.getPopup().setContent(popup);
+      } else {
+        m.bindPopup(popup, { closeButton: false, autoPan: true, maxWidth: 260 });
+      }
+    }
+
+    // Remove stale markers
+    for (const [key, m] of radarMarkers.entries()) {
+      if (!keep.has(key)) {
+        try { radarMap.removeLayer(m); } catch (e) {}
+        radarMarkers.delete(key);
+      }
+    }
+  }
+  const $refresh = document.getElementById('refreshBtn');
+  const $last = document.getElementById('lastUpdated');
+  const $err = document.getElementById('errbox');
+  const $dot = document.getElementById('statusDot');
+  const $status = document.getElementById('statusText');
+
+  const $savedBtn = document.getElementById('savedBtn');
+
+const $airportBtn = document.getElementById('airportBtn');
+
+const $airportModal = document.getElementById('airportModal');
+const $airportInput = document.getElementById('airportInput');
+const $airportList = document.getElementById('airportList');
+const $airportSelectedDisplay = document.getElementById('airportSelectedDisplay');
+const $airportPickerList = document.getElementById('airportPickerList');
+const $airportClose = document.getElementById('airportClose');
+const $airportApply = document.getElementById('airportApply');
+const $airportUseDefault = document.getElementById('airportUseDefault');
+
+function showAirportModal() {
+  if (!$airportModal) return;
+  $airportModal.classList.add('show');
+  $airportModal.setAttribute('aria-hidden', 'false');
+  if ($airportInput) {
+    // Hidden value used by existing apply logic
+    $airportInput.value = (APT && APT.icao) ? APT.icao : (DEFAULT_APT ? DEFAULT_APT.icao : "");
+  }
+  if ($airportSelectedDisplay) {
+    const current = (APT && APT.icao) ? APT : DEFAULT_APT;
+    $airportSelectedDisplay.textContent = airportLabel(current);
+  }
+  renderAirportPicker('');
+}
+function hideAirportModal() {
+  if (!$airportModal) return;
+  $airportModal.classList.remove('show');
+  $airportModal.setAttribute('aria-hidden', 'true');
+}
+
+function parseAirportInput(v) {
+  const s = (v || "").trim();
+  if (!s) return null;
+  // Expected formats: "YBBN - Brisbane, AU" or "YBBN"
+  const icao = s.slice(0,4).toUpperCase();
+  return findAirportByIcao(icao);
+}
+
+function rebuildAirportList() {
+  if (!$airportList) return;
+  $airportList.innerHTML = '';
+  for (const a of AIRPORTS) {
+    const opt = document.createElement('option');
+    opt.value = `${a.icao} - ${a.name}, ${a.country}`;
+    $airportList.appendChild(opt);
+  }
+}
+rebuildAirportList();
+
+function airportLabel(apt){
+  if (!apt) return "";
+  return `${apt.icao} — ${apt.name}, ${apt.country}`;
+}
+
+function renderAirportPicker(filterText){
+  if (!$airportPickerList) return;
+  const q = (filterText || "").trim().toLowerCase();
+  const items = AIRPORTS.filter(a => {
+    if (!q) return true;
+    const icao = (a.icao || "").toLowerCase();
+    const name = (a.name || "").toLowerCase();
+    return icao.includes(q) || name.includes(q);
+  });
+
+  $airportPickerList.innerHTML = "";
+  if (!items.length){
+    const empty = document.createElement('div');
+    empty.className = 'pickerEmpty';
+    empty.textContent = 'No matches. Try an ICAO (e.g. YSSY) or city name.';
+    $airportPickerList.appendChild(empty);
+    return;
+  }
+
+  items.forEach(a => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'pickerItem';
+    const selectedIcao = ($airportInput && $airportInput.value) ? $airportInput.value.toUpperCase() : (APT ? APT.icao : "");
+    btn.setAttribute('aria-selected', selectedIcao === a.icao ? 'true' : 'false');
+    btn.innerHTML = `<span class="pickerCode">${a.icao}</span> <span class="pickerMeta">${a.name}, ${a.country}</span>`;
+    btn.addEventListener('click', () => {
+      if ($airportInput) $airportInput.value = a.icao;
+      if ($airportSelectedDisplay) $airportSelectedDisplay.textContent = airportLabel(a);
+      // re-render so selection highlight updates
+      renderAirportPicker('');
+    });
+    $airportPickerList.appendChild(btn);
+  });
+}
+
+
+
+function applySelectedAirport(apt) {
+  if (!apt) return false;
+  APT = apt;
+  saveAirport(apt);
+  updateAirportHeader();
+  // Radar: re-center if map has been initialised
+  try { radarRecenter(); } catch(e) {}
+  return true;
+}
+
+function firstRunNeedsWelcome() {
+  try { return !localStorage.getItem(AIRPORT_STORE_KEY); } catch { return true; }
+}
+
+// Welcome behaviour:
+// - Always show the airport modal on app open.
+// - If first run: keep waiting for Start spotting.
+// - Otherwise: keep v0.4.14 behaviour (app is started) but modal still shows.
+if (firstRunNeedsWelcome()) {
+  // keep not-started until user taps Start
+  updateAirportHeader();
+  showAirportModal();
+} else {
+  APP_STARTED = true;
+  updateAirportHeader();
+  showAirportModal();
+}
+
+  const $savedModal = document.getElementById('savedModal');
+  const $savedList = document.getElementById('savedList');
+  const $savedMeta = document.getElementById('savedMeta');
+  const $closeSavedBtn = document.getElementById('closeSavedBtn');
+  const $clearSavedBtn = document.getElementById('clearSavedBtn');
+
+
+  // ===== Helpers =====
+  const clamp = (n, a, b) => Math.min(b, Math.max(a, n));
+
+  function setStatus(kind, text) {
+    $dot.className = 'dot' + (kind === 'ok' ? ' ok' : kind === 'err' ? ' err' : '');
+    $status.textContent = text;
+  }
+
+  function showError(msg) {
+    $err.style.display = 'block';
+    $err.textContent = msg;
+  }
+
+  function clearError() {
+    $err.style.display = 'none';
+    $err.textContent = '';
+  }
+
+  function fmtTime(d) {
+    const hh = String(d.getHours()).padStart(2,'0');
+    const mm = String(d.getMinutes()).padStart(2,'0');
+    const ss = String(d.getSeconds()).padStart(2,'0');
+    return `${hh}:${mm}:${ss}`;
+  }
+
+  function nmFromMeters(m) { return m / 1852; }
+  function ft(n) { return (typeof n === 'number' && isFinite(n)) ? Math.round(n) : null; }
+  function kt(n) { return (typeof n === 'number' && isFinite(n)) ? Math.round(n) : null; }
+
+
+// Airline name lookup (best-effort) from ICAO callsign prefix (e.g. DAL93 -> Delta Air Lines).
+const AIRLINE_ICAO = {
+  RON: "Nauru Airlines",
+  MXD: "Batik Air",
+  FJI: "Fiji Airways",
+  DAL: "Delta Air Lines",
+  AAL: "American Airlines",
+  ACA: "Air Canada",
+  ANZ: "Air New Zealand",
+  UAL: "United Airlines",
+  JBU: "JetBlue",
+  SWA: "Southwest",
+  ASA: "Alaska Airlines",
+  FFT: "Frontier",
+  NKS: "Spirit Airlines",
+  JAL: "Japan Airlines",
+  ANA: "All Nippon Airways",
+  SIA: "Singapore Airlines",
+  QFA: "Qantas",
+  QLK: "QantasLink",
+  JST: "Jetstar",
+  VOZ: "Virgin Australia",
+  TGW: "Tigerair",
+  VJC: "VietJet Air",
+  ACI: "Aircalin",
+  ANG: "Air Niugini",
+  CPA: "Cathay Pacific",
+  CAL: "China Airlines",
+  CES: "China Eastern",
+  CCA: "Air China",
+  CSN: "China Southern",
+  EVA: "EVA Air",
+  KAL: "Korean Air",
+  AAR: "Asiana Airlines",
+  THA: "Thai Airways",
+  AFR: "Air France",
+  BAW: "British Airways",
+  DLH: "Lufthansa",
+  KLM: "KLM",
+  QTR: "Qatar Airways",
+  UAE: "Emirates",
+  ETD: "Etihad Airways",
+  "PAL": "Philippine Airlines",
+};
+    // Aircraft type (ICAO) -> friendly display (manufacturer + model)
+    // Source: common ICAO aircraft type designators (best-effort; unknowns fall back to the raw type code).
+    const TYPE_ICAO = {
+      // Airbus
+      A388: { maker: "Airbus", model: "A380-800" },
+      A359: { maker: "Airbus", model: "A350-900" },
+      A35K: { maker: "Airbus", model: "A350-1000" },
+      A346: { maker: "Airbus", model: "A340-600" },
+      A343: { maker: "Airbus", model: "A340-300" },
+      A333: { maker: "Airbus", model: "A330-300" },
+      A332: { maker: "Airbus", model: "A330-200" },
+      A321: { maker: "Airbus", model: "A321-200" },
+      A320: { maker: "Airbus", model: "A320-200" },
+      A319: { maker: "Airbus", model: "A319-100" },
+      A20N: { maker: "Airbus", model: "A320neo" },
+      A21N: { maker: "Airbus", model: "A321neo" },
+      A19N: { maker: "Airbus", model: "A319neo" },
+
+      // Boeing
+      B77W: { maker: "Boeing", model: "777-300ER" },
+      B772: { maker: "Boeing", model: "777-200" },
+      B773: { maker: "Boeing", model: "777-300" },
+      B789: { maker: "Boeing", model: "787-9" },
+      B788: { maker: "Boeing", model: "787-8" },
+      B78X: { maker: "Boeing", model: "787-10" },
+      B747: { maker: "Boeing", model: "747" },
+      B744: { maker: "Boeing", model: "747-400" },
+      B748: { maker: "Boeing", model: "747-8" },
+      B739: { maker: "Boeing", model: "737-900" },
+      B738: { maker: "Boeing", model: "737-800" },
+      B737: { maker: "Boeing", model: "737-700" },
+      B736: { maker: "Boeing", model: "737-600" },
+      B735: { maker: "Boeing", model: "737-500" },
+      B734: { maker: "Boeing", model: "737-400" },
+      B733: { maker: "Boeing", model: "737-300" },
+
+      // Common regional / other (optional nice-to-have)
+      E190: { maker: "Embraer", model: "E190" },
+      E195: { maker: "Embraer", model: "E195" },
+      E170: { maker: "Embraer", model: "E170" },
+      E175: { maker: "Embraer", model: "E175" },
+      AT76: { maker: "ATR", model: "72-600" },
+      AT75: { maker: "ATR", model: "72-500" },
+      DH8D: { maker: "De Havilland", model: "Dash 8-400" },
+      SF34: { maker: "Saab", model: "340" },
+    };
+
+    function aircraftTypePretty(icaoType) {
+      const t = (icaoType || "").toUpperCase().trim();
+      if (!t) return "";
+      const info = TYPE_ICAO[t];
+      if (info && info.maker && info.model) return `${info.maker} – ${info.model}`;
+      // Generic fallback for Airbus/Boeing patterns (still useful even if we don't have an exact mapping)
+      if (/^A\d{2,3}[A-Z]?$/.test(t) || /^A\d{2}N$/.test(t)) return `Airbus – ${t}`;
+      if (/^B\d{3}[A-Z]?$/.test(t) || /^B7\d{2}[A-Z]?$/.test(t)) return `Boeing – ${t}`;
+      return t;
+    }
+
+
+    // Heavy aircraft highlight (simple ICAO type-based check)
+    const HEAVY_TYPES = new Set([
+      // Airbus
+      "A306","A310","A332","A333","A338","A339","A342","A343","A345","A346","A359","A35K","A388",
+      // Boeing
+      "B741","B742","B743","B744","B748","B752","B753","B762","B763","B764","B772","B773","B77L","B77W","B788","B789","B781",
+      // Other widebodies / heavies
+      "MD11","DC10","L101","IL96","A124","C5M","C17"
+    ]);
+    function isHeavyType(t) {
+      const x = (t || "").toString().trim().toUpperCase();
+      if (!x) return false;
+      if (HEAVY_TYPES.has(x)) return true;
+      // Common patterns
+      if (/^B74[0-9]$/.test(x)) return true;
+      if (/^B77[0-9A-Z]$/.test(x)) return true;
+      if (/^B78[0-9]$/.test(x)) return true;
+      if (/^A3(3[0-9]|4[0-9]|5[0-9])$/.test(x)) return true;
+      if (x === "A388") return true;
+      return false;
+    }
+
+
+function airlineNameFromFlight(flight) {
+  if (!flight) return "";
+  const code = String(flight).trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+  // RFDS often broadcasts as FD### (e.g. FD449). Treat these as RFDS.
+  if (/^FD\d/.test(code)) return "RFDS";
+
+  const prefix = code.slice(0, 3);
+  return AIRLINE_ICAO[prefix] || "Private";
+}
+
+
+  // Great-circle distance (Haversine)
+  function distNM(lat1, lon1, lat2, lon2) {
+    const R = 6371000;
+    const toRad = x => x * Math.PI / 180;
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a = Math.sin(dLat/2)**2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLon/2)**2;
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return nmFromMeters(R * c);
+  }
+
+  // Initial bearing from point A -> B
+  function bearingDeg(lat1, lon1, lat2, lon2) {
+    const toRad = x => x * Math.PI / 180;
+    const toDeg = x => x * 180 / Math.PI;
+    const φ1 = toRad(lat1), φ2 = toRad(lat2);
+    const λ1 = toRad(lon1), λ2 = toRad(lon2);
+    const y = Math.sin(λ2 - λ1) * Math.cos(φ2);
+    const x = Math.cos(φ1) * Math.sin(φ2) - Math.sin(φ1) * Math.cos(φ2) * Math.cos(λ2 - λ1);
+    const θ = Math.atan2(y, x);
+    return (toDeg(θ) + 360) % 360;
+  }
+
+  function angleDiff(a, b) {
+    // smallest absolute difference between 2 headings (0..180)
+    const d = ((a - b + 540) % 360) - 180;
+    return Math.abs(d);
+  }
+
+  function isGroundish(p) {
+    // Exclude ground / tower emitters and empty/noisy entries
+    const flight = (p.flight || '').trim().toUpperCase();
+    const t = (p.t || '').trim().toUpperCase();
+    const type = (p.type || '').trim().toLowerCase();
+
+    if (type && type !== 'adsb_icao') return true;
+
+    if (flight === 'TWR' || flight === 'GND' || flight === 'TMR') return true;
+    if (t === 'TWR' || t === 'GND' || t === 'TMR') return true;
+
+    // If it has no usable position, treat as not showable
+    if (typeof p.lat !== 'number' || typeof p.lon !== 'number') return true;
+    return false;
+  }
+
+  function inboundScore(p, dnm) {
+    // Scoring to rank "most likely inbound" at the top
+    // Bigger score = better.
+    const gs = kt(p.gs) ?? 0;
+    const alt = ft(p.alt_baro ?? p.alt_geom) ?? 0;
+    const track = (typeof p.track === 'number') ? p.track : null;
+    const br = (typeof p.baro_rate === 'number') ? p.baro_rate : (typeof p.geom_rate === 'number' ? p.geom_rate : null);
+
+    const brToward = (track == null) ? 180 : bearingDeg(p.lat, p.lon, APT.lat, APT.lon);
+    const hdgDiff = (track == null) ? 180 : angleDiff(track, brToward);
+
+    let score = 0;
+
+    // close = better
+    score += clamp((LIMITS.maxNM - dnm) / LIMITS.maxNM, 0, 1) * 40;
+
+    // heading alignment
+    score += clamp((120 - hdgDiff) / 120, 0, 1) * 35;
+
+    // descending
+    if (br < -200) score += 12;
+
+    // speed (reasonable)
+    score += clamp(gs / 350, 0, 1) * 10;
+
+    // altitude lower is better (late inbound)
+    score += clamp((12000 - alt) / 12000, 0, 1) * 8;
+
+    return score;
+  }
+
+  function isInboundCandidate(p) {
+    if (isGroundish(p)) return false;
+
+    // Basic limits
+    const alt = ft(p.alt_baro ?? p.alt_geom);
+    if (alt != null && alt > LIMITS.maxAltFt) return false;
+
+    const seen = (typeof p.seen_pos === 'number') ? p.seen_pos : (typeof p.seen === 'number' ? p.seen : null);
+    if (seen != null && seen > LIMITS.seenSec) return false;
+
+    const dnm = distNM(p.lat, p.lon, APT.lat, APT.lon);
+    if (dnm > LIMITS.maxNM) return false;
+
+    // Already at pattern/circuit altitude while still well out — almost certainly
+    // established at a different nearby field (e.g. Archerfield), not inbound here.
+    if (alt != null && dnm >= RULES.tooLowMinDistNm && alt <= RULES.tooLowMaxAltFt) return false;
+
+    // Brisbane-only: exclude Amberley (YAMB) local traffic that otherwise matches inbound rules.
+    if (shouldExcludeAmberleyTraffic(p, dnm)) return false;
+
+    const gs = kt(p.gs) ?? 0;
+
+    const track = (typeof p.track === 'number') ? p.track : null;
+    const brToward = (track == null) ? null : bearingDeg(p.lat, p.lon, APT.lat, APT.lon);
+    const hdgDiff = (track == null || brToward == null) ? 180 : angleDiff(track, brToward);
+
+    const br = (typeof p.baro_rate === 'number') ? p.baro_rate : (typeof p.geom_rate === 'number' ? p.geom_rate : null);
+
+    // Very short final override
+    if (dnm <= RULES.veryShortNM) {
+      if (alt != null && alt <= RULES.veryShortMaxAltFt && gs >= RULES.veryShortMinKt) {
+        // Guard against departures/taxi: strong climb is almost never "on final"
+        if (br != null && br > (RULES.veryShortMaxClimbFpm ?? RULES.maxClimbFpm)) return false;
+
+        // If heading is missing, only accept when extremely close and low.
+        if (track == null) return (dnm <= 2 && (alt == null || alt <= 1500));
+
+        return hdgDiff <= RULES.veryShortMaxHeadingDiffDeg;
+      }
+    }
+
+    // Mid-range: must be clearly inbound
+    if (dnm >= RULES.midMinNM) {
+      if (gs < RULES.midMinKt) return false;
+      if ((br != null && br > RULES.maxClimbFpm)) return false;
+
+      // Allow "vectoring/downwind" arrivals (common at big fields):
+      // If we're descending and reasonably close, keep the target even if not pointing at the airport yet.
+      if (track != null && hdgDiff > RULES.midMaxHeadingDiffDeg) {
+        if (dnm > 30) return false;
+        if (br != null) {
+          if (br > RULES.midVectorMinDescentFpm) return false;
+        } else {
+          // Missing rate: only accept if not flying directly away and reasonably low
+          if (!(hdgDiff <= 120 && alt != null && alt <= 8000)) return false;
+        }
+      }
+      return true;
+    }
+
+    // Short range: allow more flexibility but still prefer inbound
+    if (gs < RULES.shortMinKt) return false;
+    if ((br != null && br > RULES.maxClimbFpm)) return false;
+    if (track != null && hdgDiff > RULES.shortMaxHeadingDiffDeg) {
+      // Allow turning onto final even at short range (e.g. joining final over the bay)
+      // as long as it isn't actively climbing away.
+      if (br != null && br > RULES.shortVectorMaxClimbFpm) return false;
+    }
+
+    return true;
+  }
+
+  function pickLabel(p) {
+    const flight = (p.flight || '').trim();
+    const type = (p.t || '').trim();
+    return flight || type || (p.hex ? p.hex.toUpperCase() : '—');
+  }
+
+  function pickSub(p) {
+    const reg = (p.r || '').trim();
+    const flight = (p.flight || '').trim();
+    const type = (p.t || '').trim();
+
+    const left = reg ? reg : '—';
+    const right = flight ? flight : (type || '—');
+    return `${left} • ${right}`;
+  }
+
+  let CURRENT_LIST = [];
+
+  const ICONS = {
+    clock: `<svg width="12" height="12" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M10 6.5V10l2.5 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`,
+    landing: `<svg width="12" height="12" viewBox="0 0 20 20" fill="none"><path d="M3 15h14M6 15l3-9 2 2 5-3-1 5-4 2-2 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+    runway: `<svg width="11" height="11" viewBox="0 0 20 20" fill="none"><path d="M8 3h4v14H8z" stroke="currentColor" stroke-width="1.4"/><path d="M10 5v10" stroke="currentColor" stroke-width="1.4" stroke-dasharray="1.6 1.8"/></svg>`,
+    heavy: `<svg width="11" height="11" viewBox="0 0 20 20" fill="none"><path d="M2 11l16-7-3.5 14-4-6-6-1z" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></svg>`,
+    bookmark: `<svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M5 3.5h10a1 1 0 011 1V17l-6-3.5L4 17V4.5a1 1 0 011-1z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>`,
+    ruler: `<svg width="12" height="12" viewBox="0 0 20 20" fill="none"><path d="M3 13l10-10 4 4-10 10-4-4z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/></svg>`,
+    alt: `<svg width="12" height="12" viewBox="0 0 20 20" fill="none"><path d="M10 3v14M10 3l-3 3M10 3l3 3M10 17l-3-3M10 17l3-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+    gs: `<svg width="12" height="12" viewBox="0 0 20 20" fill="none"><path d="M4 13a6 6 0 0112 0" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><path d="M10 13l3-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="10" cy="13" r="1" fill="currentColor"/></svg>`,
+    vr: `<svg width="12" height="12" viewBox="0 0 20 20" fill="none"><path d="M10 4v12M10 16l-3-3M10 16l3-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+    eye: `<svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M2 10s3-5.5 8-5.5S18 10 18 10s-3 5.5-8 5.5S2 10 2 10z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="10" cy="10" r="2.3" stroke="currentColor" stroke-width="1.5"/></svg>`
+  };
+
+  function render(list) {
+    CURRENT_LIST = list.slice();
+    $cards.innerHTML = '';
+
+    if (!list.length) {
+      const empty = document.createElement('div');
+      empty.className = 'card';
+      empty.innerHTML = `
+        <div class="row">
+          <div>
+            <div class="flight" style="font-size: 26px;">No inbound matches right now</div>
+            <div class="small">Try Refresh again in ~30 seconds.</div>
+          </div>
+          <div class="tag">${APT && APT.icao ? APT.icao : "—"}</div>
+        </div>
+      `;
+      $cards.appendChild(empty);
+
+      // Radar markers (additive-only)
+      try { updateRadar([]); } catch (e) {}
+      return;
+    }
+
+    const activeKeys = new Set();
+
+    list.forEach((it, idx) => {
+      const dnm = it._dist_nm;
+      const alt = ft(it.alt_baro ?? it.alt_geom);
+      const gs = kt(it.gs);
+      const vr = (typeof it.baro_rate === 'number') ? Math.round(it.baro_rate) : (typeof it.geom_rate === 'number' ? Math.round(it.geom_rate) : null);
+
+      const etaMin = (gs && gs > 0) ? Math.max(1, Math.round((dnm / gs) * 60)) : null; // simple, rough
+      const isLanding = (typeof dnm === 'number') && (dnm <= 5);
+      const statusText = isLanding ? 'Landing' : 'Arriving';
+      const tagClass = isLanding ? 'tag landing' : 'tag arriving';
+
+      // Runway label (appears inside 2nm). Once it hits high confidence, lock it and never downgrade.
+      const _rk = getRunwayCacheKey(it);
+      if (_rk) activeKeys.add(_rk);
+
+      let rwyInfo = null;
+      const cached = _rk ? runwayLockCache.get(_rk) : null;
+      if (cached && typeof cached.name === 'string' && cached.name) {
+        // Only show the cached runway if we are inside the display window (predictRunwayForAircraft handles that too,
+        // but we also gate here so we don't show runways outside 5nm).
+        if (typeof dnm === 'number' && dnm > 0 && (Math.round(dnm * 10) / 10) <= 2.0) {
+          rwyInfo = { name: cached.name, level: 'high' };
+        }
+      }
+
+      if (!rwyInfo) {
+        rwyInfo = predictRunwayForAircraft(it);
+        // Only lock the cache in close — 'high' confidence can now fire as far out as ~12nm
+        // (since the cross-track match runs at range too), but that early call can still be
+        // wrong if the aircraft hasn't fully converged onto its centerline yet. Caching it
+        // then would freeze a possibly-wrong answer for the rest of the approach. Locking
+        // only inside 3nm keeps the cache doing what it's actually for: stabilising the
+        // chip right at the point display starts (2nm), not "remembering" an early guess.
+        if (_rk && rwyInfo && rwyInfo.level === 'high' && !cached &&
+            typeof dnm === 'number' && dnm <= 3) {
+          runwayLockCache.set(_rk, { name: rwyInfo.name, ts: Date.now() });
+        }
+      }
+
+      // Conservative runway display: only show the RWY chip very close-in (<=2.0 nm) to avoid wrong side-calls.
+      // The spotting popup deliberately uses the *un-gated* value below — it already has its own "closed/missing
+      // primary spot" honesty built in, and a hint further out is more useful than none at all for planning a move.
+      // If the precise cross-track match above hasn't resolved (aircraft not yet converged onto either
+      // centerline — still on a STAR/vector routing), fall back to the broader relative-heading estimate.
+      // This never touches rwyInfo used for the chip below, only the raw values captured for the popup.
+      const rwyInfoForPopup = rwyInfo || estimateNorthFamilyEarly(it);
+      const rawRwy = rwyInfoForPopup ? rwyInfoForPopup.name : null;
+      const rawRwyLevel = rwyInfoForPopup ? rwyInfoForPopup.level : null;
+      const _dnm1 = (typeof dnm === 'number' && isFinite(dnm)) ? (Math.round(dnm * 10) / 10) : null;
+      if (!(_dnm1 != null && _dnm1 <= 2.0)) {
+        rwyInfo = null;
+      }
+
+      const rwy = rwyInfo ? rwyInfo.name : null;
+      const rwyLevel = rwyInfo ? rwyInfo.level : null;
+
+      const card = document.createElement('div');
+      card.className = 'card' + (isLanding ? ' landing' : '');
+
+      const heavy = isHeavyType(it.t);
+
+      const statusIcon = isLanding ? ICONS.landing : ICONS.clock;
+      // Arrival progress bar: purely distance-based so it's always monotonic — closer always
+      // means fuller, full stop. (Previously this borrowed the runway-side confidence level,
+      // but that only updates via two disconnected rules — an early-call heuristic that can
+      // fire as far as ~25-30nm out, and a close-in lock under 2NM — so two aircraft at very
+      // different distances could show wildly inconsistent bars. Runway-call confidence is
+      // still visible separately via the RWY chip's colour.)
+      const progressPct = (typeof dnm === 'number' && isFinite(dnm))
+        ? Math.max(5, Math.min(98, Math.round(100 * (1 - dnm / LIMITS.maxNM))))
+        : 15;
+      const confBar = `<div class="confidence"><i style="width:${progressPct}%"></i></div>`;
+
+      card.innerHTML = `
+        <div class="row">
+          <div>
+            <div class="flight">${escapeHtml(pickLabel(it))}</div>
+            ${(()=>{ const f=(it.flight||"").trim(); const an=airlineNameFromFlight(f); const tp=aircraftTypePretty(it.t); return `<div class="airline">${escapeHtml(an)}</div>${tp ? `<div class="atype">${escapeHtml(tp)}</div>` : ""}`; })()}
+            <div class="small">${escapeHtml(pickSub(it))}</div>
+          </div>
+          <div class="cardBtns">
+            <button class="spotBtn" type="button" data-rwy="${rawRwy || ''}" data-level="${rawRwyLevel || ''}" data-flight="${escapeHtml(pickLabel(it))}" aria-label="Best spotting position">${ICONS.eye}</button>
+            <button class="saveBtn" type="button" data-save-idx="${idx}" aria-label="Save shot">${ICONS.bookmark}</button>
+          </div>
+        </div>
+
+        <div class="tagRow"><div class="${tagClass}">${statusIcon}${statusText}</div>${rwy ? `<div class="tag tag-runway ${rwyLevel === 'high' ? 'tag-runway-high' : 'tag-runway-likely'}">${ICONS.runway}RWY ${rwy}</div>` : ``}${heavy ? `<div class="tag tag-heavy">${ICONS.heavy}Heavy</div>` : ''}</div>
+        ${confBar}
+
+        <div class="grid">
+          <div class="chip">${ICONS.clock}<div class="v">${etaMin != null ? etaMin : '—'}</div><div class="k">ETA min</div></div>
+          <div class="chip">${ICONS.ruler}<div class="v">${dnm.toFixed(1)}</div><div class="k">Dist nm</div></div>
+          <div class="chip">${ICONS.alt}<div class="v">${alt != null ? alt.toLocaleString() : '—'}</div><div class="k">Alt ft</div></div>
+          <div class="chip">${ICONS.gs}<div class="v">${gs != null ? gs.toLocaleString() : '—'}</div><div class="k">GS kt</div></div>
+          <div class="chip">${ICONS.vr}<div class="v">${vr != null ? vr.toLocaleString() : '—'}</div><div class="k">VR fpm</div></div>
+        </div>
+      `;
+
+      $cards.appendChild(card);
+
+      const spotBtn = card.querySelector('button.spotBtn');
+      if (spotBtn) {
+        spotBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          showSpotModal(spotBtn.getAttribute('data-rwy') || '', spotBtn.getAttribute('data-flight') || '', spotBtn.getAttribute('data-level') || '');
+        });
+      }
+
+      const sb = card.querySelector('button.saveBtn');
+      if (sb) {
+        sb.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const i = Number(sb.getAttribute('data-save-idx'));
+          const it2 = (Number.isFinite(i) && CURRENT_LIST[i]) ? CURRENT_LIST[i] : it;
+          saveShotFromAircraft(it2);
+        });
+      }
+    });
+
+    // Radar markers (additive-only)
+    try { updateRadar(list); } catch (e) {}
+
+    pruneRunwayLockCache(activeKeys);
+  }
+
+  function showSpotModal(runwayName, flightLabel, level) {
+    const modal = document.getElementById('spotModal');
+    const sub = document.getElementById('spotModalSub');
+    const body = document.getElementById('spotModalBody');
+    if (!modal || !body) return;
+
+    const icao = (APT && APT.icao) ? String(APT.icao).toUpperCase() : '';
+    const label = flightLabel || 'This flight';
+    if (sub) sub.textContent = runwayName ? `${label} · RWY ${runwayName}` : label;
+
+    if (!runwayName) {
+      body.innerHTML = `<div class="spotEmpty">No runway confirmed yet for ${escapeHtml(label)} — check back once it's inside 2nm.</div>`;
+    } else {
+      const estimateNote = (level === 'high')
+        ? ''
+        : `<div class="spotEmpty">Early estimate, not locked yet — worth a quick check once ${escapeHtml(label)} is closer in.</div>`;
+      const { matches, missingPrimary } = bestSpotsForRunway(icao, runwayName);
+      const missingHtml = missingPrimary
+        ? `<div class="spotEmpty">${escapeHtml(missingPrimary.name)} is normally the best pick for RWY ${escapeHtml(runwayName)}, but it's currently ${escapeHtml(missingPrimary.status)}.</div>`
+        : '';
+      if (!matches.length) {
+        body.innerHTML = estimateNote + (missingHtml || `<div class="spotEmpty">No mapped spot for RWY ${escapeHtml(runwayName)} yet.</div>`);
+      } else {
+        const cardsHtml = matches.map(s => `
+          <div class="spotCard${isDedicatedSpot(s) ? '' : ' secondary'}">
+            <div class="row"><span class="name">${escapeHtml(s.name)}</span><span class="lens">${escapeHtml(s.lens)}</span></div>
+            <div class="notes">${escapeHtml(s.notes)}</div>
+          </div>
+        `).join('');
+        body.innerHTML = `${estimateNote}${missingHtml}<div class="spotCards">${cardsHtml}</div>`;
+      }
+    }
+
+    modal.classList.add('show');
+    modal.setAttribute('aria-hidden', 'false');
+  }
+
+  function hideSpotModal() {
+    const modal = document.getElementById('spotModal');
+    if (!modal) return;
+    modal.classList.remove('show');
+    modal.setAttribute('aria-hidden', 'true');
+  }
+
+  function escapeHtml(s) {
+    return String(s)
+      .replaceAll('&','&amp;')
+      .replaceAll('<','&lt;')
+      .replaceAll('>','&gt;')
+      .replaceAll('"','&quot;')
+      .replaceAll("'",'&#39;');
+  }
+
+  async function tryFetchWithProxy(proxyPath) {
+    const url = new URL(proxyPath, location.href);
+    url.searchParams.set('lat', String(APT.lat));
+    url.searchParams.set('lon', String(APT.lon));
+    url.searchParams.set('dist_nm', String(LIMITS.maxNM));
+    url.searchParams.set('_', String(Date.now())); // cache bust
+
+    const resp = await fetch(url.toString(), { cache: 'no-store' });
+    if (!resp.ok) {
+      const t = await resp.text().catch(()=>'');
+      // Full raw body always goes to console for debugging; the UI only ever shows a clean message.
+      console.error(`Proxy HTTP ${resp.status} at ${proxyPath}`, t);
+      const looksLikeHtml = /<!doctype html|<html[\s>]/i.test(t.trim());
+      const err = new Error(
+        looksLikeHtml
+          ? `Proxy HTTP ${resp.status} at ${proxyPath}`
+          : `Proxy HTTP ${resp.status} at ${proxyPath}${t ? `\n${t.slice(0, 200)}` : ''}`
+      );
+      err.httpStatus = resp.status;
+      err.isHtmlBody = looksLikeHtml;
+      throw err;
+    }
+
+    const raw = await resp.text();
+    try {
+      return JSON.parse(raw);
+    } catch (parseErr) {
+      console.error(`Proxy returned non-JSON at ${proxyPath}`, raw);
+      const err = new Error(`Proxy at ${proxyPath} did not return valid JSON`);
+      err.isHtmlBody = /<!doctype html|<html[\s>]/i.test(raw.trim());
+      throw err;
+    }
+  }
+
+  async function fetchAircraft() {
+    let lastErr = null;
+    for (const p of PROXY_CANDIDATES) {
+      try {
+        return await tryFetchWithProxy(p);
+      } catch (e) {
+        lastErr = e;
+      }
+    }
+    throw lastErr || new Error('Proxy fetch failed');
+  }
+
+  function normalizeAircraft(json) {
+    // adsb.lol often returns { ac: [...] }
+    const arr = Array.isArray(json) ? json : (json && (json.ac || json.aircraft || json.data) ? (json.ac || json.aircraft || json.data) : []);
+    return Array.isArray(arr) ? arr : [];
+  }
+
+  function computeEtaMin(distNm, gsKt) {
+    // Simple ground-speed ETA. Conservative guards to avoid nonsense.
+    if (!(typeof distNm === 'number') || !(typeof gsKt === 'number')) return null;
+    if (!isFinite(distNm) || !isFinite(gsKt)) return null;
+    if (distNm < 0) return null;
+    if (gsKt < 30) return null; // taxi/ground/hover/garbage
+    const minutes = (distNm / gsKt) * 60;
+    if (!isFinite(minutes) || minutes < 0) return null;
+    // Cap super-long ETAs so they don't dominate sorting (we only show nearby anyway)
+    return Math.round(Math.min(minutes, 24 * 60));
+  }
+
+  // ===== Auto-refresh resilience =====
+  // Tracks consecutive failures so the auto-refresh interval can back off
+  // (10s -> 20s -> 30s, capped) instead of hammering a struggling proxy/feed.
+  let consecutiveFailures = 0;
+  const MAX_AUTO_REFRESH_MS = 30000;
+
+  async function refresh(isSilentRetry) {
+    if (refreshInProgress) return;
+    refreshInProgress = true;
+    if (!isSilentRetry) clearError();
+    $refresh.disabled = true;
+    setStatus('ok', 'Loading…');
+    const started = Date.now();
+
+    try {
+      const json = await fetchAircraft();
+      const ac = normalizeAircraft(json);
+
+      // keep saved shots up to date (status/runway) even if saved before landing
+      updateSavedShotsFromLive(ac);
+
+      // attach distance for rendering + precompute ETA for sorting
+      for (const p of ac) {
+        if (typeof p.lat === 'number' && typeof p.lon === 'number') {
+          p._dist_nm = distNM(p.lat, p.lon, APT.lat, APT.lon);
+          p._eta_min = computeEtaMin(p._dist_nm, p.gs);
+        }
+      }
+
+      const filtered = ac
+        .filter(p => typeof p._dist_nm === 'number')
+        .filter(p => p._dist_nm <= LIMITS.maxNM)
+        .filter(isInboundCandidate)
+        // Primary: ETA (ascending). Unknown ETA goes to the bottom.
+        // Tie-break: closer distance.
+        .sort((a, b) => {
+          const ea = (typeof a._eta_min === 'number') ? a._eta_min : null;
+          const eb = (typeof b._eta_min === 'number') ? b._eta_min : null;
+          if (ea == null && eb == null) return (a._dist_nm || 1e9) - (b._dist_nm || 1e9);
+          if (ea == null) return 1;
+          if (eb == null) return -1;
+          if (ea !== eb) return ea - eb;
+          return (a._dist_nm || 1e9) - (b._dist_nm || 1e9);
+        })
+        .slice(0, LIMITS.maxResults);
+
+      render(filtered);
+
+      const took = Math.round(Date.now() - started);
+      $last.textContent = `${fmtTime(new Date())} (${took}ms)`;
+      setStatus('ok', `${filtered.length} shown`);
+      consecutiveFailures = 0;
+      $refresh.disabled = false;
+      refreshInProgress = false;
+      scheduleNextAutoRefresh();
+
+    } catch (e) {
+      $refresh.disabled = false;
+      refreshInProgress = false;
+
+      // First failure: retry once, silently, shortly after — most 502s/hiccups
+      // clear within a couple of seconds and this avoids flashing an error for nothing.
+      if (!isSilentRetry) {
+        setTimeout(() => { refresh(true); }, 2000);
+        return;
+      }
+
+      consecutiveFailures += 1;
+      setStatus('err', 'Error');
+      if (e && e.isHtmlBody) {
+        const status = e.httpStatus ? ` (HTTP ${e.httpStatus})` : '';
+        showError(`Feed unavailable${status}. The server returned an error page instead of flight data — usually a temporary host or network hiccup. Try Refresh in a moment.`);
+      } else {
+        showError(`Load failed\n${e && e.message ? e.message : String(e)}`);
+      }
+      scheduleNextAutoRefresh();
+    }
+  }
+
+  let autoRefreshTimer = null;
+  function scheduleNextAutoRefresh() {
+    if (autoRefreshTimer) { clearTimeout(autoRefreshTimer); autoRefreshTimer = null; }
+    if (AUTO_REFRESH_MS <= 0) return;
+    const delay = Math.min(AUTO_REFRESH_MS * (1 + consecutiveFailures), MAX_AUTO_REFRESH_MS);
+    autoRefreshTimer = setTimeout(() => {
+      if (APP_STARTED && !refreshInProgress) refresh();
+    }, delay);
+  }
+
+  
+  // ===== Saved shots (persistent localStorage) =====
+  const SAVED_KEY = 'shotlog_saved_shots_v1';
+
+  function loadSaved() {
+    try {
+      const raw = localStorage.getItem(SAVED_KEY);
+      const arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr : [];
+    } catch {
+      return [];
+    }
+  }
+
+  function persistSaved(arr) {
+    try { localStorage.setItem(SAVED_KEY, JSON.stringify(arr)); } catch {}
+  }
+
+  function sanitizeSavedShots(arr){
+  if(!Array.isArray(arr)) return [];
+  let changed = false;
+  const out = arr.map(s=>{
+    if(!s || typeof s!=='object') return s;
+    const ns = {...s};
+    if(ns.runway && typeof ns.runway === 'object'){
+      const ro = ns.runway;
+      const rName = (typeof ro.name === 'string' && ro.name) ? ro.name :
+                    (typeof ro.rwy === 'string' && ro.rwy) ? ro.rwy :
+                    (typeof ro.id === 'string' && ro.id) ? ro.id : '';
+      ns.runway = rName || '—';
+      changed = true;
+    }
+    return ns;
+  });
+  if(changed){
+    try { persistSaved(out); } catch(e){}
+  }
+  return out;
+}
+
+function computeSavedStatus(dnm, altFt, gsKt){
+  if(dnm == null) return 'Arriving';
+  if(dnm <= 1.5){
+    const altOk = (altFt != null && altFt <= 120) || altFt === 0;
+    const gsOk = (gsKt != null && gsKt <= 55) || gsKt === 0;
+    if(altOk && gsOk) return 'Landed';
+  }
+  if(dnm <= 5) return 'Landing';
+  return 'Arriving';
+}
+
+function updateSavedShotsFromLive(allAircraft){
+  if(!Array.isArray(savedShots) || savedShots.length === 0) return;
+  if(!Array.isArray(allAircraft) || allAircraft.length === 0) return;
+
+  let touched = false;
+  const now = Date.now();
+  const matched = new Set();
+
+  const byHex = new Map();
+  const byReg = new Map();
+  for(const a of allAircraft){
+    if(a && a.hex) byHex.set(a.hex, a);
+    if(a && a.r) byReg.set(a.r, a);
+  }
+
+  for(const s of savedShots){
+    if(!s || typeof s !== 'object') continue;
+    const live = (s.hex && byHex.get(s.hex)) || (s.reg && byReg.get(s.reg));
+    if(!live) continue;
+
+    const dnm = (live.lat && live.lon) ? distNM(live.lat, live.lon, APT.lat, APT.lon) : null;
+
+    // If the aircraft reaches our disappearance threshold (<= 0.6 NM), treat it as landed immediately.
+    // This mirrors the live-card rule (cards disappear at <= 0.6 NM) so saved cards update promptly.
+    const landedByDisappear = (typeof dnm === 'number' && isFinite(dnm) && dnm <= 0.6);
+
+    const k = s.key || s.hex || s.reg;
+    if (k) matched.add(k);
+    s.lastSeenAt = now;
+    if (dnm != null && isFinite(dnm)) {
+      s.lastSeenDist = dnm;
+      if (typeof s.minDistNm !== 'number') s.minDistNm = dnm;
+      else s.minDistNm = Math.min(s.minDistNm, dnm);
+    }
+    const gs = (typeof live.gs === 'number') ? Math.round(live.gs) : null;
+    const alt = (typeof live.alt === 'number') ? Math.round(live.alt) : null;
+
+    // Keep latest values for later inference (e.g., if the feed drops right at touchdown)
+    if (gs != null && isFinite(gs)) s.lastSeenGs = gs;
+    if (alt != null && isFinite(alt)) {
+      s.lastSeenAlt = alt;
+      if (typeof s.minAltFt !== 'number') s.minAltFt = alt;
+      else s.minAltFt = Math.min(s.minAltFt, alt);
+    }
+
+    let runwayName = '—';
+    if(dnm != null && dnm <= 10){
+      const rw = predictRunwayForAircraft(live);
+      runwayName = rw ? rw.name : '—';
+    }
+
+    if(dnm != null) { s.dist = +(dnm.toFixed(1)); touched = true; }
+    if(alt != null) { s.alt = alt; touched = true; }
+    if(gs != null) { s.gs = gs; touched = true; }
+    if(typeof live.vr === 'number') { s.vr = Math.round(live.vr); touched = true; }
+
+    // Prefer an immediate "Landed" once it hits the disappearance threshold.
+    // Otherwise fall back to the existing conservative status logic.
+    const st = landedByDisappear ? 'Landed' : computeSavedStatus(dnm, alt, gs);
+    if(st && s.status !== st){ s.status = st; touched = true; }
+
+    if (landedByDisappear) {
+      // Make saved summary reflect touchdown right away.
+      if (s.etaMin !== 0) { s.etaMin = 0; touched = true; }
+      if (typeof s.dist === 'number' ? s.dist !== 0 : true) { s.dist = 0.0; touched = true; }
+    }
+
+    if(runwayName && runwayName !== '—'){
+      if(s.runway !== runwayName){ s.runway = runwayName; touched = true; }
+    } else if(s.runway && typeof s.runway === 'object'){
+      s.runway = '—'; touched = true;
+    }
+  }
+
+  // If a saved aircraft disappears very close to the airport shortly after being seen,
+  // assume it has landed (ADS-B feeds often drop it right after touchdown/taxi).
+  for (const s of savedShots) {
+    const k = s && (s.key || s.hex || s.reg);
+    if (k && matched.has(k)) continue;
+    if (!s || typeof s !== 'object') continue;
+    if (s.status === 'Landed') continue;
+    if (!s.lastSeenAt) continue;
+    const ageMs = now - s.lastSeenAt;
+
+    const runwayKnown = (typeof s.runway === 'string' && s.runway.trim() && s.runway.trim() !== '—' && s.runway.trim() !== '-');
+    const bestDist = (typeof s.minDistNm === 'number') ? s.minDistNm : (typeof s.lastSeenDist === 'number' ? s.lastSeenDist : null);
+    const bestAlt  = (typeof s.minAltFt === 'number') ? s.minAltFt : (typeof s.lastSeenAlt === 'number' ? s.lastSeenAlt : null);
+
+    // If the live feed stops updating right at touchdown, infer "Landed" using the closest/lowest values we saw.
+    // We only do this within a short window to avoid false positives.
+    const withinWindow = (ageMs >= 0 && ageMs <= 10 * 60 * 1000);
+    const closeEnough = (typeof bestDist === 'number' && bestDist <= 2.5);
+    const lowEnough   = (typeof bestAlt === 'number' && bestAlt <= 700);
+    const runwayApproach = runwayKnown && (typeof s.lastSeenDist === 'number' ? s.lastSeenDist <= 10 : true);
+
+    if (withinWindow && (closeEnough || lowEnough || runwayApproach)) {
+      s.status = 'Landed';
+      s.etaMin = 0;
+      s.distNm = 0;
+      touched = true;
+    }
+  }
+
+
+  if(touched){
+    try { persistSaved(savedShots); } catch(e){}
+    updateSavedBtn();
+    if ($savedModal && $savedModal.classList.contains('show')) renderSavedList();
+  }
+}
+
+let savedShots = sanitizeSavedShots(loadSaved());
+
+  function showToast(msg) {
+    const el = document.getElementById('toast');
+    if (!el) return;
+    el.textContent = msg;
+    el.classList.add('show');
+    clearTimeout(showToast._t);
+    showToast._t = setTimeout(() => el.classList.remove('show'), 1600);
+  }
+
+  function updateSavedBtn() {
+    if (!$savedBtn) return;
+    $savedBtn.textContent = `Saved ${savedShots.length}`;
+  }
+
+  function openSavedModal() {
+    if (!$savedModal) return;
+    renderSavedList();
+    $savedModal.classList.add('show');
+    $savedModal.setAttribute('aria-hidden', 'false');
+  }
+
+  function closeSavedModal() {
+    if (!$savedModal) return;
+    $savedModal.classList.remove('show');
+    $savedModal.setAttribute('aria-hidden', 'true');
+  }
+
+  function formatWhen(ts) {
+    try {
+      const d = new Date(ts);
+      return d.toLocaleString(undefined, { year:'numeric', month:'short', day:'2-digit', hour:'2-digit', minute:'2-digit' });
+    } catch {
+      return '';
+    }
+  }
+
+  function renderSavedList() {
+    if (!$savedList) return;
+    $savedList.innerHTML = '';
+    if ($savedMeta) $savedMeta.textContent = `${savedShots.length} saved`;
+
+    if (!savedShots.length) {
+      const d = document.createElement('div');
+      d.className = 'savedItem';
+      d.innerHTML = `<div class="savedCall">No saved shots yet</div><div class="savedWhen">Tap “Save” on a flight card.</div>`;
+      $savedList.appendChild(d);
+      return;
+    }
+
+    savedShots.slice().reverse().forEach((s, idxFromEnd) => {
+      const idx = savedShots.length - 1 - idxFromEnd; // original index
+      const item = document.createElement('div');
+      item.className = 'savedItem';
+      item.innerHTML = `
+        <div class="savedTop">
+          <div>
+            <div class="savedCall">${escapeHtml(s.flight || s.label || '—')}</div>
+            <div class="savedWhen">Saved: ${escapeHtml(formatWhen(s.savedAt))}</div>
+          </div>
+          <div class="savedActions">
+            <button class="tinyBtn" data-del="${idx}">Delete</button>
+          </div>
+        </div>
+        <div class="savedGrid">
+          <div><b>Airline:</b> ${escapeHtml(s.airline || 'Private')}</div>
+          <div><b>Reg:</b> ${escapeHtml(s.reg || '—')}</div>
+          <div><b>Type:</b> ${(()=>{ const p=aircraftTypePretty(s.type); const t=(p? p.replace(' – ',' '):(s.type||'—')); return escapeHtml(t); })()}${s.heavy ? ' (Heavy)' : ''}</div>
+          <div><b>Status:</b> ${escapeHtml(s.status || 'Arriving')}</div>
+          <div><b>Runway:</b> ${escapeHtml(s.runway || '—')}</div>
+          <div><b>ETA:</b> ${s.etaMin != null ? `${s.etaMin} min` : '—'}</div>
+          <div><b>Dist:</b> ${s.distNm != null ? `${s.distNm.toFixed(1)} nm` : '—'}</div>
+          <div><b>Alt:</b> ${s.altFt != null ? `${Math.round(s.altFt)} ft` : '—'}</div>
+          <div><b>GS:</b> ${s.gsKt != null ? `${Math.round(s.gsKt)} kt` : '—'}</div>
+        </div>
+      `;
+      item.querySelector('[data-del]')?.addEventListener('click', () => {
+        savedShots.splice(idx, 1);
+        persistSaved(savedShots);
+        updateSavedBtn();
+        renderSavedList();
+      });
+      $savedList.appendChild(item);
+    });
+  }
+
+  function saveShotFromAircraft(it) {
+    if (!it) return;
+    const dnm = it._dist_nm;
+    const alt = (typeof it.alt_baro === 'number') ? it.alt_baro : (typeof it.alt_geom === 'number' ? it.alt_geom : null);
+    const gs = (typeof it.gs === 'number') ? it.gs : null;
+    const etaMin = (gs && gs > 0 && typeof dnm === 'number') ? Math.max(1, Math.round((dnm / gs) * 60)) : null;
+    const isLanding = (typeof dnm === 'number') && (dnm <= 5);
+    const status = isLanding ? 'Landing' : 'Arriving';
+    const runway = predictRunwayForAircraft(it);
+    const runwayName = (runway && runway.name) ? runway.name : "";
+    const heavy = isHeavyType(it.t);
+    const flight = (it.flight || '').trim().toUpperCase() || pickLabel(it);
+
+    const shot = {
+      savedAt: Date.now(),
+      flight,
+      label: pickLabel(it),
+      airline: airlineNameFromFlight(flight),
+      hex: it.hex || null,
+      reg: it.r || it.reg || null,
+      type: it.t || null,
+      heavy,
+      status,
+      distNm: (typeof dnm === 'number') ? dnm : null,
+      altFt: (typeof alt === 'number') ? alt : null,
+      gsKt: (typeof gs === 'number') ? gs : null,
+      minDistNm: (typeof dnm === 'number') ? dnm : null,
+      minAltFt: (typeof alt === 'number') ? alt : null,
+      vrFpm: (typeof it.baro_rate === 'number') ? it.baro_rate : null,
+      etaMin,
+      runway: runwayName || null
+    };
+
+    // de-dupe: same flight within 2 minutes -> replace last
+    const last = savedShots[savedShots.length - 1];
+    if (last && last.flight === shot.flight && Math.abs(last.savedAt - shot.savedAt) < 2 * 60 * 1000) {
+      savedShots[savedShots.length - 1] = shot;
+    } else {
+      savedShots.push(shot);
+    }
+    persistSaved(savedShots);
+    updateSavedBtn();
+    showToast(`Saved: ${shot.flight}`);
+  }
+
+  updateSavedBtn();
+
+// ===== Wire up =====
+  // View toggle (Cards / Radar)
+  if ($viewCardsBtn) $viewCardsBtn.addEventListener('click', () => setViewMode('cards'));
+  if ($viewRadarBtn) $viewRadarBtn.addEventListener('click', () => setViewMode('radar'));
+  // Default view
+  setViewMode('cards');
+
+  $refresh.addEventListener('click', refresh);
+
+if ($airportBtn) $airportBtn.addEventListener('click', () => {
+  showAirportModal();
+});
+if ($airportClose) $airportClose.addEventListener('click', () => {
+  // If first run and not started, keep modal open by allowing close only after start
+  if (!APP_STARTED && firstRunNeedsWelcome()) return;
+  hideAirportModal();
+});
+if ($airportModal) $airportModal.addEventListener('click', (e) => {
+  if (e.target === $airportModal) {
+    if (!APP_STARTED && firstRunNeedsWelcome()) return;
+    hideAirportModal();
+  }
+});
+if ($airportUseDefault) $airportUseDefault.addEventListener('click', () => {
+  applySelectedAirport(DEFAULT_APT);
+  if (!APP_STARTED) { hideAirportModal(); startApp(); }
+  else { hideAirportModal(); refresh(); }
+});
+if ($airportApply) $airportApply.addEventListener('click', () => {
+  const chosen = parseAirportInput($airportInput ? $airportInput.value : "");
+  const ok = applySelectedAirport(chosen || DEFAULT_APT);
+  hideAirportModal();
+  if (!APP_STARTED) startApp();
+  else refresh();
+});
+
+if ($airportInput) {
+  $airportInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if ($airportApply) $airportApply.click();
+    }
+    if (e.key === 'Escape') {
+      if (!APP_STARTED && firstRunNeedsWelcome()) return;
+      hideAirportModal();
+    }
+  });
+}
+
+  if ($savedBtn) $savedBtn.addEventListener('click', openSavedModal);
+  
+if ($airportPickerList) {
+  renderAirportPicker('');
+}
+
+if ($closeSavedBtn) $closeSavedBtn.addEventListener('click', closeSavedModal);
+  if ($savedModal) $savedModal.addEventListener('click', (e) => { if (e.target === $savedModal) closeSavedModal(); });
+
+  const $spotModal = document.getElementById('spotModal');
+  const $spotModalClose = document.getElementById('spotModalClose');
+  if ($spotModalClose) $spotModalClose.addEventListener('click', hideSpotModal);
+  if ($spotModal) $spotModal.addEventListener('click', (e) => { if (e.target === $spotModal) hideSpotModal(); });
+  if ($clearSavedBtn) $clearSavedBtn.addEventListener('click', () => { savedShots = []; persistSaved(savedShots); updateSavedBtn(); renderSavedList(); });
+
+  // Auto-load once
+  // Run after DOM is ready + a short delay to avoid mobile first-paint races.
+  function startApp() {
+    if (APP_STARTED) return;
+    APP_STARTED = true;
+    updateAirportHeader();
+    refresh();
+  }
+
+  // Run after DOM is ready + a short delay to avoid mobile first-paint races.
+  setTimeout(() => { if (APP_STARTED) refresh(); }, 350);
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      // When returning to the app, refresh immediately.
+      if (APP_STARTED && !refreshInProgress) refresh();
+    }
+  });
+
+  
+  // Auto-refresh (updates cards without manual refresh). Backs off automatically
+  // on repeated failures via scheduleNextAutoRefresh(), called from inside refresh().
+  if (AUTO_REFRESH_MS > 0) {
+    scheduleNextAutoRefresh();
+  }
+// ===== Service Worker =====
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', async () => {
+      try {
+        // cache-bust SW request so WordPress/CDN caches don't pin it
+        const swUrl = `./sw.js?v=${encodeURIComponent(VERSION)}`;
+        await navigator.serviceWorker.register(swUrl, { scope: './' });
+      } catch (e) {
+        // SW is optional; don't block the app
+        console.warn('SW register failed', e);
+      }
+    });
+  }
+})();
+</script>
+
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v4513226cdae34746b4dedf0b4dfa099e1781791509496" integrity="sha512-ZE9pZaUXND66v380QUtch/5sE9tPFh2zg45pR2PB0CVkCtOREv2AJKkSidISWkysEuQ0EH8faUU5du78bx87UQ==" data-cf-beacon='{"version":"2024.11.0","token":"523ae17e429a452a8134dc9d185b3b21","r":1,"server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
+</body>
+</html>
