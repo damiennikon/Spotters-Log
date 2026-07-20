@@ -567,6 +567,19 @@ const RUNWAYS = {
 // Archerfield Airport (YBAF) is a reliable east/west divider for southern arrivals.
 // (Used only as a geographic reference — this does not fetch any external data.)
 const ARCHERFIELD = { lat: -27.5706, lon: 153.0075 };
+
+// Sanity ceiling for predictRunwayGeometry()'s early-call heuristics (the Archerfield 01L/01R
+// rule, and the general closeInFallback below): an aircraft still well above a plausible
+// approach profile for its distance out is almost certainly still descending from cruise on a
+// STAR/vector leg, not established on final -- its track can still happen to point straight
+// at the field (satisfying the heading/position checks these rules use) purely because that's
+// the direct routing from wherever it's coming from, regardless of which runway direction is
+// actually in use that day. Applies at every airport, not just YBBN -- every real airport has
+// reciprocal-direction runway pairs, so this "track alone implies family" ambiguity is
+// structural, not Brisbane-specific. ~450ft/NM is well above a normal 3deg glideslope
+// (~318ft/NM), generous enough not to reject a genuine early approach, but well below the
+// ~650ft/NM a still-high, fast-descending STAR-leg aircraft would show.
+const EARLY_CALL_MAX_ALT_FT_PER_NM = 450;
 // Amberley exclusion zone (Brisbane only): prevent YAMB traffic (e.g., C-17s) from appearing as Brisbane inbound.
 // Small, explainable geo-fence:
 // - Only when selected airport is YBBN
@@ -739,6 +752,44 @@ function pruneRunwayLockCache(activeKeys) {
       runwayLockCache.delete(k);
     }
   }
+}
+
+// How stale a runwayLockCache entry can be and still count as evidence of "what's actually
+// active" below. Deliberately a separate constant from pruneRunwayLockCache's TTL_MS above --
+// that one is about cache memory hygiene (when to forget an aircraft that's no longer being
+// tracked), this one is about how long a confirmed runway call stays trustworthy as a signal
+// for OTHER aircraft. They happen to start at the same value, but tuning one should not
+// silently retune the other.
+const ACTIVE_FAMILY_FRESH_MS = 20 * 60 * 1000; // 20 minutes
+
+// Runway "family" is the numeric heading group shared by parallel/opposite runways (e.g.
+// '19L' and '19R' are both family '19'; '01L'/'01R' are family '01'). Two runways on the same
+// physical strip are always in different families (opposite ends), so comparing families is
+// exactly the "which direction is actually in use" question -- as opposed to L/R, which is a
+// same-direction side call.
+function extractRunwayFamily(name) {
+  const m = /^(\d+)/.exec(String(name || ''));
+  return m ? m[1] : null;
+}
+
+// Same-session "what runway direction has actually been confirmed in use" signal. Only
+// 'high'-confidence, cross-track-verified, close-in (<=3NM) results ever populate
+// runwayLockCache (see the write site below), so any entry in it is real, trustworthy
+// evidence for THAT aircraft -- treating the most recent one as "today's active direction" is
+// a reasonable, self-contained substitute for actual wind/ATC data. Returns null when there's
+// no recent confirmed evidence yet (e.g. start of session, or just after switching airports),
+// in which case callers should fall back to their existing behavior rather than guessing.
+function getRecentConfirmedFamily() {
+  const now = Date.now();
+  let bestTs = -Infinity;
+  let bestFamily = null;
+  for (const v of runwayLockCache.values()) {
+    if (!v || typeof v.ts !== 'number' || (now - v.ts) > ACTIVE_FAMILY_FRESH_MS) continue;
+    const fam = extractRunwayFamily(v.name);
+    if (!fam) continue;
+    if (v.ts > bestTs) { bestTs = v.ts; bestFamily = fam; }
+  }
+  return bestFamily;
 }
 
 
@@ -923,6 +974,20 @@ function predictRunwayGeometry(it) {
     if (track == null || !Number.isFinite(track)) return null;
 
     const dnm = it._dist_nm;
+
+    // Altitude-plausibility check, used by both the Archerfield rule and the general
+    // close-in fallback below: track+position alone can't distinguish "established on
+    // approach" from "still transiting toward the field on a STAR, before curving around to
+    // land the opposite direction" -- both look identical geometrically, since the direct
+    // routing from a given side necessarily points the aircraft's track at the field. A
+    // still-high, fast-descending-from-cruise aircraft is not remotely close to being
+    // established, regardless of track. When altitude is unknown, don't gate (matches how
+    // the rest of this function treats missing fields).
+    const alt = (typeof it.alt_baro === 'number') ? it.alt_baro
+      : ((typeof it.alt_geom === 'number') ? it.alt_geom : null);
+    const altPlausibleForEarlyCall = (alt == null) || !(typeof dnm === 'number') ||
+      (alt <= EARLY_CALL_MAX_ALT_FT_PER_NM * dnm);
+
     // Direction-of-travel sanity check: avoid predicting the reciprocal runway when the aircraft is on downwind/base
     // (e.g., tracking along the coast away/sideways from the airport). We only show a runway when motion is generally
     // toward the airport, unless we're very close-in.
@@ -962,7 +1027,8 @@ function predictRunwayGeometry(it) {
         // approach from the north -- can trip it while still nominally south of the field and
         // "toward" it in a broad sense. Use a real absolute tolerance instead, consistent with
         // the geometry match's own bestDiff <= 28 "aligned" gate below.
-        angleDiffDeg(track, 10) <= 45
+        angleDiffDeg(track, 10) <= 45 &&
+        altPlausibleForEarlyCall
       ) {
         // East of Archerfield => 01R, West => 01L
         const side = (lon0 > ARCHERFIELD.lon) ? '01R' : '01L';
@@ -1025,7 +1091,14 @@ function predictRunwayGeometry(it) {
 
       const closeInFallback = (typeof dnm === 'number' && dnm <= 20 && bestDiff <= 35);
 
-      if (!( (aligned && onApproachSide && nearCenterline) || closeInFallback )) return null;
+      // altPlausibleForEarlyCall applies to BOTH branches here, not just closeInFallback: an
+      // aircraft simply flying a straight line toward the airport from a compass direction
+      // that happens to match one runway's heading will naturally satisfy aligned/
+      // onApproachSide/nearCenterline too, regardless of whether it actually intends to land
+      // that direction -- that's exactly the LR552 case (see EARLY_CALL_MAX_ALT_FT_PER_NM
+      // above). Real convergence onto a centerline close-in still passes easily, since a
+      // genuinely established aircraft is well under this ceiling at any distance in range.
+      if (!( ((aligned && onApproachSide && nearCenterline) || closeInFallback) && altPlausibleForEarlyCall )) return null;
 
       // Upgrade to HIGH confidence when close & tightly aligned
       const highRaw = (typeof dnm === 'number' && dnm <= 12 && bestDiff <= 18 && crossNm <= 3 && onApproachSide) ||
@@ -1140,6 +1213,15 @@ function predictRunwayGeometry(it) {
 // result -- the bay-entry estimate gets a chance to fill the gap; if it doesn't apply (wrong
 // airport, wrong heading family, no recorded entry yet), we fall back to whatever the geometry
 // produced.
+//
+// Any non-'high' guess (geometry's early-call heuristics, or the bay-entry estimate) is also
+// checked against getRecentConfirmedFamily(): track+position alone can make an aircraft still
+// transiting toward the field look like it matches a runway family it has no intention of
+// using (e.g. heading north toward BNE from the south looks like a 01 final even on a day
+// when 19 is the active direction and this aircraft will curve around). A 'high' result is
+// never subject to this check -- it's real cross-track-verified evidence for THIS aircraft
+// and always wins. When there's no recent confirmed evidence yet, this is a no-op and
+// behavior is unchanged.
 function predictRunwayForAircraft(it) {
   const key = getRunwayCacheKey(it);
   recordBayEntryPosition(it, key);
@@ -1147,10 +1229,16 @@ function predictRunwayForAircraft(it) {
   const precise = predictRunwayGeometry(it);
   if (precise && precise.level === 'high') return precise;
 
-  const bayEstimate = estimateBayEntryEarly(it, key);
-  if (bayEstimate) return bayEstimate;
+  const activeFamily = getRecentConfirmedFamily();
+  const contradictsActiveFamily = (result) =>
+    !!(result && activeFamily && extractRunwayFamily(result.name) !== activeFamily);
 
-  return precise;
+  const bayEstimate = estimateBayEntryEarly(it, key);
+  if (bayEstimate && !contradictsActiveFamily(bayEstimate)) return bayEstimate;
+
+  if (precise && !contradictsActiveFamily(precise)) return precise;
+
+  return null;
 }
 
 
@@ -1535,8 +1623,21 @@ function renderAirportPicker(filterText){
 
 
 
+// runwayLockCache/bayEntryCache entries only ever mean anything relative to the airport they
+// were recorded under (a runway name like '19L' or a recorded bay-entry longitude is
+// meaningless -- or worse, silently misleading -- once compared against a different airport's
+// geometry). This matters more now than it used to: runwayLockCache also backs
+// getRecentConfirmedFamily()'s cross-aircraft "what's actually active" signal, so a stale
+// entry surviving an airport switch could wrongly suppress legitimate calls at the newly
+// selected airport for up to ACTIVE_FAMILY_FRESH_MS.
+function resetRunwayPredictionCaches() {
+  runwayLockCache.clear();
+  bayEntryCache.clear();
+}
+
 function applySelectedAirport(apt) {
   if (!apt) return false;
+  if (!APT || APT.icao !== apt.icao) resetRunwayPredictionCaches();
   APT = apt;
   saveAirport(apt);
   updateAirportHeader();
