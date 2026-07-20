@@ -831,7 +831,13 @@ function predictRunwayForAircraft(it) {
         // Not too far out (keeps this “planning hint” local)
         dnm <= 30 &&
         // Must be meaningfully moving toward the airport (cos>~0.2 handled above; we also require not-away)
-        (towardAirportCos == null || towardAirportCos > 0.10)
+        (towardAirportCos == null || towardAirportCos > 0.10) &&
+        // Track must actually be consistent with a 01-approach (~010°), not a 19-approach (~190°).
+        // Without this, a southbound aircraft on final for 19L/19R (which sits south of the
+        // "south-of-BNE" gate above) can satisfy every position check here and get mislabelled
+        // as 01L/01R while inbound to the opposite runway. Relative check (closer to 010 than
+        // 190) rather than an absolute window, consistent with estimateNorthFamilyEarly() above.
+        angleDiffDeg(track, 10) < angleDiffDeg(track, 190)
       ) {
         // East of Archerfield => 01R, West => 01L
         const side = (lon0 > ARCHERFIELD.lon) ? '01R' : '01L';
