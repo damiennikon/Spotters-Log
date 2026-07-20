@@ -1,0 +1,7 @@
+{
+  "name": "spotters-log",
+  "private": true,
+  "scripts": {
+    "test": "node --test"
+  }
+}
