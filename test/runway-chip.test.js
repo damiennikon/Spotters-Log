@@ -43,14 +43,14 @@ test('beyond 2NM with a raw runway guess shows the muted estimate chip', () => {
   assert.match(html, /tag-runway-estimate/);
   assert.doesNotMatch(html, /tag-runway-high/);
   assert.doesNotMatch(html, /tag-runway-likely"/); // not the confirmed "likely" class
-  assert.match(html, /RWY 19L\?/);
+  assert.match(html, /RWY 19L</); // no "?" suffix — the muted style alone carries the distinction
 });
 
 test('<=2NM confirmed high-confidence runway keeps the existing locked style', () => {
   const html = runwayChipHtml('19L', 'high', '19L', 'high', ICON);
   assert.match(html, /tag-runway-high/);
   assert.doesNotMatch(html, /tag-runway-estimate/);
-  assert.match(html, /RWY 19L</); // no trailing "?" on a confirmed call
+  assert.match(html, /RWY 19L</);
 });
 
 test('<=2NM likely-confidence runway keeps the existing likely style', () => {

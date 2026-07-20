@@ -147,8 +147,8 @@
   .tag.tag-heavy{ color:var(--warn); background:var(--warn-soft); border-color:var(--warn-border); }
   .tag.tag-runway.tag-runway-high{ color:var(--accent); background:var(--accent-soft); border-color:var(--accent-border); }
   .tag.tag-runway.tag-runway-likely{ color:var(--warn); background:var(--warn-soft); border-color:var(--warn-border); }
-  /* Early guess, well outside the 2NM lock window — muted/outlined so it never reads as confirmed. */
-  .tag.tag-runway.tag-runway-estimate{ color:var(--text-2); background:transparent; border:1px dashed var(--border-strong); }
+  /* Early guess, well outside the 2NM lock window — muted grey so it never reads as confirmed. */
+  .tag.tag-runway.tag-runway-estimate{ color:var(--text-3); background:var(--surface-2); border-color:var(--border); }
 
   .confidence{ margin-top:6px; height:3px; border-radius:2px; background:var(--surface-3); overflow:hidden; max-width:130px; }
   .confidence i{ display:block; height:100%; background:var(--accent); border-radius:2px; }
@@ -791,6 +791,14 @@ function estimateNorthFamilyEarly(it) {
 // estimate is never treated as a confident/locked answer -- see estimateBayEntryEarly() below.
 const bayEntryCache = new Map();
 
+// Redcliffe sits almost exactly on BNE's own reference longitude, so a "first ever poll"
+// captured anywhere near there is in the ambiguous zone for the east/west check below -- an
+// aircraft truly approaching from the west can still read as marginally east of APT.lon (or
+// vice versa) if the app didn't start tracking it until it had already curved that far in.
+// Below this distance there's no reliable "which side did it enter from" signal, so the
+// recorded position is not trustworthy for classification even though we still keep it around.
+const BAY_ENTRY_MIN_DIST_NM = 12;
+
 function pruneBayEntryCache(activeKeys) {
   const now = Date.now();
   const TTL_MS = 20 * 60 * 1000; // 20 minutes, same as runwayLockCache
@@ -812,7 +820,8 @@ function recordBayEntryPosition(it, key) {
     const lat = (typeof it.lat === 'number') ? it.lat : null;
     const lon = (typeof it.lon === 'number') ? it.lon : null;
     if (lat == null || lon == null || !Number.isFinite(lat) || !Number.isFinite(lon)) return;
-    bayEntryCache.set(key, { lat, lon, ts: Date.now() });
+    const dnm = (typeof it._dist_nm === 'number' && Number.isFinite(it._dist_nm)) ? it._dist_nm : null;
+    bayEntryCache.set(key, { lat, lon, dnm, ts: Date.now() });
   } catch (e) {}
 }
 
@@ -853,6 +862,10 @@ function estimateBayEntryEarly(it, key) {
 
     const entry = key ? bayEntryCache.get(key) : null;
     if (!entry) return null;
+    // Only trust the recorded entry position if it was actually captured far enough out --
+    // otherwise we have no real "which side did it come in from" data, and a close-in first
+    // poll near Redcliffe's longitude can misclassify the side entirely (see BAY_ENTRY_MIN_DIST_NM above).
+    if (!(typeof entry.dnm === 'number' && entry.dnm >= BAY_ENTRY_MIN_DIST_NM)) return null;
 
     const side = (entry.lon > APT.lon) ? '19L' : '19R';
     return { name: side, level: 'estimate' };
@@ -1872,14 +1885,14 @@ function airlineNameFromFlight(flight) {
   // Picks the RWY chip's markup. `rwy`/`rwyLevel` are the gated (<=2NM, locked/confirmed) values;
   // `rawRwy`/`rawRwyLevel` are the same ungated values the spotting popup already uses. When the
   // gated value is missing (still beyond 2NM) we still show the raw guess, but in a visually distinct
-  // "estimate" style so it can never be mistaken for the confirmed high/likely chip.
+  // muted/grey "estimate" style so it can never be mistaken for the confirmed high/likely chip.
   function runwayChipHtml(rwy, rwyLevel, rawRwy, rawRwyLevel, icon) {
     if (rwy) {
       const cls = rwyLevel === 'high' ? 'tag-runway-high' : 'tag-runway-likely';
       return `<div class="tag tag-runway ${cls}">${icon}RWY ${rwy}</div>`;
     }
     if (rawRwy) {
-      return `<div class="tag tag-runway tag-runway-estimate">${icon}RWY ${rawRwy}?</div>`;
+      return `<div class="tag tag-runway tag-runway-estimate">${icon}RWY ${rawRwy}</div>`;
     }
     return '';
   }
