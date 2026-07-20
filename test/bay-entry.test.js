@@ -54,6 +54,7 @@ function loadBayEntryModule() {
 
   const pieces = [
     extractStatement(html, 'const BAY_ENTRY_MIN_DIST_NM ='),
+    extractStatement(html, 'const BAY_ENTRY_MIN_LON_OFFSET_NM ='),
     extractFunction(html, 'angleDiffDeg'),
     extractFunction(html, 'bearingDeg'),
     extractFunction(html, 'recordBayEntryPosition'),

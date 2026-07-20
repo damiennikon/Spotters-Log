@@ -799,6 +799,15 @@ const bayEntryCache = new Map();
 // recorded position is not trustworthy for classification even though we still keep it around.
 const BAY_ENTRY_MIN_DIST_NM = 12;
 
+// Clearing BAY_ENTRY_MIN_DIST_NM only means the first poll was far enough from the airport --
+// it says nothing about how far it was from BNE's longitude itself. An aircraft transiting
+// down the coast from the north can sit almost exactly on APT.lon for a long stretch, so a
+// first poll can be well past 12NM out and still be only fractionally east/west of the line --
+// the same ambiguity Redcliffe causes close-in, just reached a different way. Require the
+// entry point to actually be a meaningful distance from APT.lon (not just from the airport)
+// before trusting its side.
+const BAY_ENTRY_MIN_LON_OFFSET_NM = 3;
+
 function pruneBayEntryCache(activeKeys) {
   const now = Date.now();
   const TTL_MS = 20 * 60 * 1000; // 20 minutes, same as runwayLockCache
@@ -866,6 +875,13 @@ function estimateBayEntryEarly(it, key) {
     // otherwise we have no real "which side did it come in from" data, and a close-in first
     // poll near Redcliffe's longitude can misclassify the side entirely (see BAY_ENTRY_MIN_DIST_NM above).
     if (!(typeof entry.dnm === 'number' && entry.dnm >= BAY_ENTRY_MIN_DIST_NM)) return null;
+
+    // Distance-out alone isn't enough -- also require the entry point to be a meaningful
+    // distance from APT.lon itself (see BAY_ENTRY_MIN_LON_OFFSET_NM above), otherwise a
+    // technically-far-out-but-longitude-marginal first poll is just as ambiguous as a close-in
+    // Redcliffe one.
+    const entryLonOffsetNm = Math.abs(entry.lon - APT.lon) * Math.cos(APT.lat * Math.PI / 180) * 60;
+    if (!(entryLonOffsetNm >= BAY_ENTRY_MIN_LON_OFFSET_NM)) return null;
 
     const side = (entry.lon > APT.lon) ? '19L' : '19R';
     return { name: side, level: 'estimate' };
