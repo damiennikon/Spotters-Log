@@ -841,7 +841,7 @@ function predictRunwayForAircraft(it) {
       ) {
         // East of Archerfield => 01R, West => 01L
         const side = (lon0 > ARCHERFIELD.lon) ? '01R' : '01L';
-        return { runway: side, level: 'likely+' };
+        return { name: side, level: 'likely+' };
       }
       // No unconditional return here — fall through to the general cross-track logic below,
       // which compares actual position against each candidate runway's own extended
