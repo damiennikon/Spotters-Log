@@ -100,18 +100,23 @@ function loadModule() {
     extractStatement(html, 'const BAY_ENTRY_MIN_DIST_NM ='),
     extractStatement(html, 'const BAY_ENTRY_MIN_LON_OFFSET_NM ='),
     extractConstObject(html, 'ARCHERFIELD'),
+    extractStatement(html, 'const EARLY_CALL_MAX_ALT_FT_PER_NM ='),
+    extractStatement(html, 'const ACTIVE_FAMILY_FRESH_MS ='),
     extractFunction(html, 'angleDiffDeg'),
     extractFunction(html, 'bearingDeg'),
     extractFunction(html, 'predictRunwayGeometry'),
     extractFunction(html, 'recordBayEntryPosition'),
     extractFunction(html, 'estimateBayEntryEarly'),
     extractFunction(html, 'getRunwayCacheKey'),
+    extractFunction(html, 'extractRunwayFamily'),
+    extractFunction(html, 'getRecentConfirmedFamily'),
     extractFunction(html, 'predictRunwayForAircraft'),
   ].join('\n\n');
 
   const wrapper = `(function() {
     let APT = null;
     const bayEntryCache = new Map();
+    const runwayLockCache = new Map();
     ${pieces}
     return {
       predictRunwayGeometry,
@@ -119,6 +124,7 @@ function loadModule() {
       recordBayEntryPosition,
       predictRunwayForAircraft,
       bayEntryCache,
+      runwayLockCache,
       setAPT: (apt) => { APT = apt; },
     };
   })`;

@@ -55,12 +55,21 @@ function extractConstObject(html, name) {
   return html.slice(start, semi + 1);
 }
 
+function extractStatement(html, marker) {
+  const start = html.indexOf(marker);
+  assert.notEqual(start, -1, `"${marker}" not found in index.html`);
+  const end = html.indexOf(';', start);
+  assert.notEqual(end, -1, `could not find end of statement starting "${marker}"`);
+  return html.slice(start, end + 1);
+}
+
 function loadPredictRunwayGeometry() {
   const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 
   const pieces = [
     extractConstObject(html, 'RUNWAYS'),
     extractConstObject(html, 'ARCHERFIELD'),
+    extractStatement(html, 'const EARLY_CALL_MAX_ALT_FT_PER_NM ='),
     extractFunction(html, 'angleDiffDeg'),
     extractFunction(html, 'bearingDeg'),
     extractFunction(html, 'predictRunwayGeometry'),
@@ -136,4 +145,32 @@ test('a genuine southbound 19 final south of the field is never mislabelled as 0
     false,
     `expected no 01 call for a southbound 19 final, got ${JSON.stringify(result)}`
   );
+});
+
+test('LR552 repro: a still-high, fast-descending-from-cruise aircraft south of the field on a 010-ish track is not called as 01 just because its track matches', () => {
+  const mod = loadPredictor();
+
+  // Same track/position shape as the "genuine 01 approach" case above (which correctly still
+  // gets the early call, see test below) -- the only difference is altitude. 10,850ft at
+  // 16.4NM (~660ft/NM) is not remotely close to an established approach profile; this is a
+  // STAR-leg aircraft still transiting toward the field, whose track happens to point at BNE
+  // simply because that's the direct routing from the south -- not evidence it's on a 01 final.
+  const it = { lat: -27.65, lon: 153.05, track: 15, _dist_nm: 16.4, alt_baro: 10850 };
+  const result = mod.predictRunwayGeometry(it);
+  const isConfident01 = !!(result && result.name && result.name.startsWith('01'));
+  assert.equal(
+    isConfident01,
+    false,
+    `expected no 01 call for a still-high STAR-leg aircraft, got ${JSON.stringify(result)}`
+  );
+});
+
+test('a genuine 01 approach at a plausible altitude for its distance still gets the early call', () => {
+  const mod = loadPredictor();
+
+  // Same position/track as the LR552 repro above, but at an altitude consistent with an
+  // aircraft actually established on approach at 16.4NM (below the ~450ft/NM ceiling).
+  const it = { lat: -27.65, lon: 153.05, track: 15, _dist_nm: 16.4, alt_baro: 4500 };
+  const result = mod.predictRunwayGeometry(it);
+  assert.deepEqual(result, { name: '01R', level: 'likely+' });
 });
