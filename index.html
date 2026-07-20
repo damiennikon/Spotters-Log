@@ -791,22 +791,39 @@ function estimateNorthFamilyEarly(it) {
 // estimate is never treated as a confident/locked answer -- see estimateBayEntryEarly() below.
 const bayEntryCache = new Map();
 
-// Redcliffe sits almost exactly on BNE's own reference longitude, so a "first ever poll"
-// captured anywhere near there is in the ambiguous zone for the east/west check below -- an
-// aircraft truly approaching from the west can still read as marginally east of APT.lon (or
-// vice versa) if the app didn't start tracking it until it had already curved that far in.
-// Below this distance there's no reliable "which side did it enter from" signal, so the
+// East/west divider for the bay-entry heuristic below. This is deliberately NOT APT.lon (BNE's
+// own reference point): both runway thresholds sit east of APT.lon (see RUNWAYS.YBBN above), so
+// the true midline between the 19L and 19R approach corridors is itself ~0.6NM east of APT.lon.
+// Redcliffe -- the real-world "did it come from Caboolture/west or Moreton Island/east" pinch
+// point for this corridor -- sits almost exactly on APT.lon, which put it (and the whole band
+// between APT.lon and the real midline) only ~0.2NM from the old divider: easily flipped east by
+// ordinary position noise even though that whole band is still on the 19R/west side of the real
+// runway split. Against the actual runway-pair midpoint, Redcliffe reads a much more solid
+// ~0.75NM west, matching the real-world pattern (Caboolture/Redcliffe-side entries -> 19R,
+// Moreton Island-side entries -> 19L).
+const BAY_DIVIDER_LON = (() => {
+  const rwys = (RUNWAYS && RUNWAYS.YBBN) || [];
+  const l = rwys.find(r => r.name === '19L');
+  const r = rwys.find(r => r.name === '19R');
+  return (l && r) ? (l.thrLon + r.thrLon) / 2 : 153.1175;
+})();
+
+// A "first ever poll" captured too close to BAY_DIVIDER_LON is in the ambiguous zone for the
+// east/west check below -- an aircraft truly approaching from one side can still read as
+// marginally on the other if the app didn't start tracking it until it had already curved that
+// far in. Below this distance there's no reliable "which side did it enter from" signal, so the
 // recorded position is not trustworthy for classification even though we still keep it around.
 const BAY_ENTRY_MIN_DIST_NM = 12;
 
 // Clearing BAY_ENTRY_MIN_DIST_NM only means the first poll was far enough from the airport --
-// it says nothing about how far it was from BNE's longitude itself. An aircraft transiting
-// down the coast from the north can sit almost exactly on APT.lon for a long stretch, so a
-// first poll can be well past 12NM out and still be only fractionally east/west of the line --
-// the same ambiguity Redcliffe causes close-in, just reached a different way. Require the
-// entry point to actually be a meaningful distance from APT.lon (not just from the airport)
-// before trusting its side.
-const BAY_ENTRY_MIN_LON_OFFSET_NM = 3;
+// it says nothing about how far it was from BAY_DIVIDER_LON itself. An aircraft transiting down
+// the coast from the north can sit close to that line for a long stretch, so a first poll can be
+// well past 12NM out and still be right on top of it. Require a small buffer around the divider
+// before trusting a side -- just enough to rule out sitting essentially on the line (GPS/track
+// noise), NOT a blanket few-mile exclusion: real Caboolture/Redcliffe-corridor entries (the
+// whole point of this heuristic) sit only ~0.75NM west of BAY_DIVIDER_LON, so a wide margin here
+// would silently swallow the exact real-world case this is meant to catch.
+const BAY_ENTRY_MIN_LON_OFFSET_NM = 0.5;
 
 function pruneBayEntryCache(activeKeys) {
   const now = Date.now();
@@ -877,13 +894,13 @@ function estimateBayEntryEarly(it, key) {
     if (!(typeof entry.dnm === 'number' && entry.dnm >= BAY_ENTRY_MIN_DIST_NM)) return null;
 
     // Distance-out alone isn't enough -- also require the entry point to be a meaningful
-    // distance from APT.lon itself (see BAY_ENTRY_MIN_LON_OFFSET_NM above), otherwise a
+    // distance from BAY_DIVIDER_LON itself (see BAY_ENTRY_MIN_LON_OFFSET_NM above), otherwise a
     // technically-far-out-but-longitude-marginal first poll is just as ambiguous as a close-in
     // Redcliffe one.
-    const entryLonOffsetNm = Math.abs(entry.lon - APT.lon) * Math.cos(APT.lat * Math.PI / 180) * 60;
+    const entryLonOffsetNm = Math.abs(entry.lon - BAY_DIVIDER_LON) * Math.cos(APT.lat * Math.PI / 180) * 60;
     if (!(entryLonOffsetNm >= BAY_ENTRY_MIN_LON_OFFSET_NM)) return null;
 
-    const side = (entry.lon > APT.lon) ? '19L' : '19R';
+    const side = (entry.lon > BAY_DIVIDER_LON) ? '19L' : '19R';
     return { name: side, level: 'estimate' };
   } catch (e) {
     return null;

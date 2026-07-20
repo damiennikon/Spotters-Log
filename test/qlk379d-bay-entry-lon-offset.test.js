@@ -68,13 +68,37 @@ function extractStatement(html, marker) {
   return html.slice(start, end + 1);
 }
 
+// Like extractStatement, but balances parens/braces first -- for statements (like the
+// BAY_DIVIDER_LON IIFE) whose value contains semicolons of its own, so the first ';' isn't
+// necessarily the end of the statement.
+function extractBalancedConst(html, name) {
+  const marker = `const ${name} = `;
+  const start = html.indexOf(marker);
+  assert.notEqual(start, -1, `const ${name} not found in index.html`);
+  let depth = 0;
+  let end = -1;
+  for (let i = html.indexOf('(', start); i < html.length; i++) {
+    const ch = html[i];
+    if (ch === '(' || ch === '{') depth++;
+    else if (ch === ')' || ch === '}') {
+      depth--;
+      if (depth === 0) { end = i; break; }
+    }
+  }
+  assert.notEqual(end, -1, `could not find end of const ${name}`);
+  const semi = html.indexOf(';', end);
+  assert.notEqual(semi, -1, `could not find terminating ";" for const ${name}`);
+  return html.slice(start, semi + 1);
+}
+
 function loadModule() {
   const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 
   const pieces = [
+    extractConstObject(html, 'RUNWAYS'),
+    extractBalancedConst(html, 'BAY_DIVIDER_LON'),
     extractStatement(html, 'const BAY_ENTRY_MIN_DIST_NM ='),
     extractStatement(html, 'const BAY_ENTRY_MIN_LON_OFFSET_NM ='),
-    extractConstObject(html, 'RUNWAYS'),
     extractConstObject(html, 'ARCHERFIELD'),
     extractFunction(html, 'angleDiffDeg'),
     extractFunction(html, 'bearingDeg'),
