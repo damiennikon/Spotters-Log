@@ -939,12 +939,10 @@ function predictRunwayForAircraft(it) {
 
         const p = toXY(lat, lon);
 
-        // Choose the runway with smallest cross-track to its extended centerline,
-        // preferring those on the approach side.
-        let best = null;
-        let bestCross = Infinity;
-
-        for (const c of candidates) {
+        // Evaluate cross-track distance to every candidate's extended centerline up front
+        // (not just the winner) so we can also measure how clearly separated the winner
+        // is from the runner-up before trusting the pick enough to cache it.
+        const evals = candidates.map(c => {
           const thr = toXY(c.thrLat, c.thrLon);
           const dx = p.x - thr.x;
           const dy = p.y - thr.y;
@@ -963,19 +961,42 @@ function predictRunwayForAircraft(it) {
           // Must be plausibly on approach side, but allow small negatives (vectors/base turns).
           const onApproachSide = approachAlongNm > -0.5;
 
-          if (onApproachSide && crossNm < bestCross) {
-            bestCross = crossNm;
-            best = c;
+          return { c, crossNm, onApproachSide };
+        });
+
+        // Choose the runway with smallest cross-track to its extended centerline,
+        // preferring those on the approach side.
+        let best = null;
+        let bestCross = Infinity;
+        for (const e of evals) {
+          if (e.onApproachSide && e.crossNm < bestCross) {
+            bestCross = e.crossNm;
+            best = e.c;
           }
         }
 
-        if (best) return { name: best.name, level };
+        if (best) {
+          // At BNE, 19L/19R (and 01L/01R) centerlines are under 1NM apart. Being
+          // "closer" to one than the other is not the same as being confidently on
+          // one side — a single noisy position sample (crosswind correction, base/final
+          // turn, ordinary ADS-B jitter) can land marginally closer to the wrong
+          // centerline. Only keep 'high' confidence (which is what gets cached and
+          // locked in for the rest of the approach) when the runner-up is clearly
+          // further away, not just numerically further by a hair.
+          const MIN_LR_MARGIN_NM = 0.25;
+          const otherCross = evals.reduce((m, e) => (e.c === best ? m : Math.min(m, e.crossNm)), Infinity);
+          const margin = otherCross - bestCross;
+          const lrLevel = (level === 'high' && margin < MIN_LR_MARGIN_NM) ? 'likely' : level;
+          return { name: best.name, level: lrLevel };
+        }
       }
 
       // Fallback heuristic: pick based on which side of the airport the aircraft is on relative to runway direction.
+      // This is a coarse "which half of the airport" guess (no centerline comparison at all), so it should
+      // never be trusted enough to lock into the cache as high confidence.
       const want = side > 0 ? 'L' : 'R';
       const picked = candidates.find(c => new RegExp(want + '$', 'i').test(c.name));
-      if (picked) return { name: picked.name, level };
+      if (picked) return { name: picked.name, level: (level === 'high' ? 'likely' : level) };
     }
 
     return { name: candidates[0].name, level };
