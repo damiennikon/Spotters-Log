@@ -147,6 +147,8 @@
   .tag.tag-heavy{ color:var(--warn); background:var(--warn-soft); border-color:var(--warn-border); }
   .tag.tag-runway.tag-runway-high{ color:var(--accent); background:var(--accent-soft); border-color:var(--accent-border); }
   .tag.tag-runway.tag-runway-likely{ color:var(--warn); background:var(--warn-soft); border-color:var(--warn-border); }
+  /* Early guess, well outside the 2NM lock window — muted/outlined so it never reads as confirmed. */
+  .tag.tag-runway.tag-runway-estimate{ color:var(--text-2); background:transparent; border:1px dashed var(--border-strong); }
 
   .confidence{ margin-top:6px; height:3px; border-radius:2px; background:var(--surface-3); overflow:hidden; max-width:130px; }
   .confidence i{ display:block; height:100%; background:var(--accent); border-radius:2px; }
@@ -1867,6 +1869,21 @@ function airlineNameFromFlight(flight) {
     eye: `<svg width="14" height="14" viewBox="0 0 20 20" fill="none"><path d="M2 10s3-5.5 8-5.5S18 10 18 10s-3 5.5-8 5.5S2 10 2 10z" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round"/><circle cx="10" cy="10" r="2.3" stroke="currentColor" stroke-width="1.5"/></svg>`
   };
 
+  // Picks the RWY chip's markup. `rwy`/`rwyLevel` are the gated (<=2NM, locked/confirmed) values;
+  // `rawRwy`/`rawRwyLevel` are the same ungated values the spotting popup already uses. When the
+  // gated value is missing (still beyond 2NM) we still show the raw guess, but in a visually distinct
+  // "estimate" style so it can never be mistaken for the confirmed high/likely chip.
+  function runwayChipHtml(rwy, rwyLevel, rawRwy, rawRwyLevel, icon) {
+    if (rwy) {
+      const cls = rwyLevel === 'high' ? 'tag-runway-high' : 'tag-runway-likely';
+      return `<div class="tag tag-runway ${cls}">${icon}RWY ${rwy}</div>`;
+    }
+    if (rawRwy) {
+      return `<div class="tag tag-runway tag-runway-estimate">${icon}RWY ${rawRwy}?</div>`;
+    }
+    return '';
+  }
+
   function render(list) {
     CURRENT_LIST = list.slice();
     $cards.innerHTML = '';
@@ -1978,7 +1995,7 @@ function airlineNameFromFlight(flight) {
           </div>
         </div>
 
-        <div class="tagRow"><div class="${tagClass}">${statusIcon}${statusText}</div>${rwy ? `<div class="tag tag-runway ${rwyLevel === 'high' ? 'tag-runway-high' : 'tag-runway-likely'}">${ICONS.runway}RWY ${rwy}</div>` : ``}${heavy ? `<div class="tag tag-heavy">${ICONS.heavy}Heavy</div>` : ''}</div>
+        <div class="tagRow"><div class="${tagClass}">${statusIcon}${statusText}</div>${runwayChipHtml(rwy, rwyLevel, rawRwy, rawRwyLevel, ICONS.runway)}${heavy ? `<div class="tag tag-heavy">${ICONS.heavy}Heavy</div>` : ''}</div>
         ${confBar}
 
         <div class="grid">
