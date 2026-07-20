@@ -784,7 +784,82 @@ function estimateNorthFamilyEarly(it) {
   }
 }
 
-function predictRunwayForAircraft(it) {
+// Bay-entry cache (YBBN 19-family only): records the earliest position we've ever seen a
+// tracked aircraft at, keyed the same way as runwayLockCache. Unlike that cache, a bay-entry
+// estimate is never treated as a confident/locked answer -- see estimateBayEntryEarly() below.
+const bayEntryCache = new Map();
+
+function pruneBayEntryCache(activeKeys) {
+  const now = Date.now();
+  const TTL_MS = 20 * 60 * 1000; // 20 minutes, same as runwayLockCache
+  for (const [k, v] of bayEntryCache.entries()) {
+    if (!k) { bayEntryCache.delete(k); continue; }
+    if (activeKeys && !activeKeys.has(k) && (now - (v.ts || 0)) > TTL_MS) {
+      bayEntryCache.delete(k);
+    }
+  }
+}
+
+// Records the first position seen for this aircraft (by cache key) and never overwrites it while
+// the entry is live -- later polls need the *earliest* snapshot, not the latest, to tell which
+// side of Moreton Bay it entered from.
+function recordBayEntryPosition(it, key) {
+  try {
+    const icao = (APT && APT.icao) ? String(APT.icao).toUpperCase() : '';
+    if (icao !== 'YBBN' || !key || bayEntryCache.has(key)) return;
+    const lat = (typeof it.lat === 'number') ? it.lat : null;
+    const lon = (typeof it.lon === 'number') ? it.lon : null;
+    if (lat == null || lon == null || !Number.isFinite(lat) || !Number.isFinite(lon)) return;
+    bayEntryCache.set(key, { lat, lon, ts: Date.now() });
+  } catch (e) {}
+}
+
+// Real-world pattern observed on FR24 over time at Brisbane: 19-family arrivals that enter
+// Moreton Bay from the east / Moreton Island side land on 19L (the eastern runway); arrivals
+// entering from the west / Caboolture side land on 19R (the western runway) -- see the
+// RUNWAYS.YBBN comment above for the L/R <-> east/west mapping. Unlike the Archerfield 01L/01R
+// rule, current position alone can't make this call: the 19L/19R centerlines are under 1NM
+// apart, so they only diverge close-in. This uses each aircraft's earliest tracked position
+// (bayEntryCache) instead, to fill the gap (roughly 10NM-2NM) before the precise cross-track
+// geometry in predictRunwayGeometry() becomes confident. Always loses to a 'high' geometry
+// result -- see the predictRunwayForAircraft wrapper below.
+function estimateBayEntryEarly(it, key) {
+  try {
+    const icao = (APT && APT.icao) ? String(APT.icao).toUpperCase() : '';
+    if (icao !== 'YBBN' || !APT || typeof APT.lat !== 'number' || typeof APT.lon !== 'number') return null;
+
+    const dnm = it._dist_nm;
+    if (!(typeof dnm === 'number' && dnm > 2 && dnm <= 18)) return null;
+
+    const lat0 = (typeof it.lat === 'number') ? it.lat : null;
+    const lon0 = (typeof it.lon === 'number') ? it.lon : null;
+    if (lat0 == null || lon0 == null || !Number.isFinite(lat0) || !Number.isFinite(lon0)) return null;
+
+    let track = (typeof it.track === 'number') ? it.track : ((typeof it.trk === 'number') ? it.trk : null);
+    if (track == null || !Number.isFinite(track)) {
+      track = bearingDeg(lat0, lon0, APT.lat, APT.lon);
+    }
+    if (track == null || !Number.isFinite(track)) return null;
+
+    // Must be meaningfully closing on the field, and consistent with a 19-approach (closer to
+    // 190 than 010) -- relative check, same style as the Archerfield rule and
+    // estimateNorthFamilyEarly() above.
+    const brgToApt = bearingDeg(lat0, lon0, APT.lat, APT.lon);
+    const towardCos = Math.cos(angleDiffDeg(track, brgToApt) * Math.PI / 180);
+    if (towardCos < 0.15) return null;
+    if (angleDiffDeg(track, 190) >= angleDiffDeg(track, 10)) return null;
+
+    const entry = key ? bayEntryCache.get(key) : null;
+    if (!entry) return null;
+
+    const side = (entry.lon > APT.lon) ? '19L' : '19R';
+    return { name: side, level: 'estimate' };
+  } catch (e) {
+    return null;
+  }
+}
+
+function predictRunwayGeometry(it) {
   try {
     const icao = (APT && APT.icao) ? String(APT.icao).toUpperCase() : '';
     const rwys = RUNWAYS[icao];
@@ -1007,6 +1082,25 @@ function predictRunwayForAircraft(it) {
 
     return { name: candidates[0].name, level };
   } catch { return null; }
+}
+
+// Records this aircraft's earliest position for the bay-entry estimate above, then runs the
+// precise cross-track geometry. The geometry wins whenever it's 'high' confidence (which, for
+// L/R pairs, already implies the margin check above passed). Below that -- including a null
+// result -- the bay-entry estimate gets a chance to fill the gap; if it doesn't apply (wrong
+// airport, wrong heading family, no recorded entry yet), we fall back to whatever the geometry
+// produced.
+function predictRunwayForAircraft(it) {
+  const key = getRunwayCacheKey(it);
+  recordBayEntryPosition(it, key);
+
+  const precise = predictRunwayGeometry(it);
+  if (precise && precise.level === 'high') return precise;
+
+  const bayEstimate = estimateBayEntryEarly(it, key);
+  if (bayEstimate) return bayEstimate;
+
+  return precise;
 }
 
 
@@ -1923,6 +2017,7 @@ function airlineNameFromFlight(flight) {
     try { updateRadar(list); } catch (e) {}
 
     pruneRunwayLockCache(activeKeys);
+    pruneBayEntryCache(activeKeys);
   }
 
   function showSpotModal(runwayName, flightLabel, level) {
