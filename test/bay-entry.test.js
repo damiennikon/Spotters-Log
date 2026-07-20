@@ -2,12 +2,12 @@
 //
 // recordBayEntryPosition() stores the *first ever* position seen for an aircraft, with no
 // regard for how far out that first poll was. estimateBayEntryEarly() then classifies
-// east/west purely by comparing that stored longitude against BNE's own reference longitude
-// (153.1175). Redcliffe sits almost exactly on that longitude, so an aircraft whose first
-// tracked poll already happens to be down near Redcliffe -- e.g. because the app didn't pick
-// it up until partway through its curve south -- can read as fractionally east of APT.lon
-// even though its actual entry into the bay was from the west (Caboolture side), producing a
-// confident-looking but wrong 19L call instead of 19R.
+// east/west purely by comparing that stored longitude against BAY_DIVIDER_LON (the midpoint
+// between the 19L/19R runway thresholds). Redcliffe sits almost exactly on that longitude, so
+// an aircraft whose first tracked poll already happens to be down near Redcliffe -- e.g.
+// because the app didn't pick it up until partway through its curve south -- can read as
+// fractionally east of the divider even though its actual entry into the bay was from the west
+// (Caboolture side), producing a confident-looking but wrong 19L call instead of 19R.
 //
 // index.html has no server-side logging and bayEntryCache is a purely in-memory runtime Map,
 // so there is no persisted historical position for the real LR444 flight to read back -- this
@@ -49,11 +49,56 @@ function extractStatement(html, marker) {
   return html.slice(start, end + 1);
 }
 
+// Like extractStatement, but balances parens/braces first -- for statements (like the
+// BAY_DIVIDER_LON IIFE) whose value contains semicolons of its own, so the first ';' isn't
+// necessarily the end of the statement.
+function extractBalancedConst(html, name) {
+  const marker = `const ${name} = `;
+  const start = html.indexOf(marker);
+  assert.notEqual(start, -1, `const ${name} not found in index.html`);
+  let depth = 0;
+  let end = -1;
+  for (let i = html.indexOf('(', start); i < html.length; i++) {
+    const ch = html[i];
+    if (ch === '(' || ch === '{') depth++;
+    else if (ch === ')' || ch === '}') {
+      depth--;
+      if (depth === 0) { end = i; break; }
+    }
+  }
+  assert.notEqual(end, -1, `could not find end of const ${name}`);
+  const semi = html.indexOf(';', end);
+  assert.notEqual(semi, -1, `could not find terminating ";" for const ${name}`);
+  return html.slice(start, semi + 1);
+}
+
+function extractConstObject(html, name) {
+  const marker = `const ${name} = {`;
+  const start = html.indexOf(marker);
+  assert.notEqual(start, -1, `const ${name} not found in index.html`);
+  const braceStart = html.indexOf('{', start);
+  let depth = 0;
+  let end = -1;
+  for (let i = braceStart; i < html.length; i++) {
+    if (html[i] === '{') depth++;
+    else if (html[i] === '}') {
+      depth--;
+      if (depth === 0) { end = i; break; }
+    }
+  }
+  assert.notEqual(end, -1, `could not find end of const ${name}`);
+  const semi = html.indexOf(';', end);
+  return html.slice(start, semi + 1);
+}
+
 function loadBayEntryModule() {
   const html = fs.readFileSync(path.join(__dirname, '..', 'index.html'), 'utf8');
 
   const pieces = [
+    extractConstObject(html, 'RUNWAYS'),
+    extractBalancedConst(html, 'BAY_DIVIDER_LON'),
     extractStatement(html, 'const BAY_ENTRY_MIN_DIST_NM ='),
+    extractStatement(html, 'const BAY_ENTRY_MIN_LON_OFFSET_NM ='),
     extractFunction(html, 'angleDiffDeg'),
     extractFunction(html, 'bearingDeg'),
     extractFunction(html, 'recordBayEntryPosition'),
@@ -101,6 +146,28 @@ test('bay-entry estimate does not fire when the first-ever poll is too close-in 
 
   const result = mod.estimateBayEntryEarly(firstPoll, key);
   assert.equal(result, null, 'an untrustworthy close-in entry point must not produce a confident side guess');
+});
+
+test('bay-entry estimate correctly resolves 19R for a first poll near Redcliffe itself, now that the divider reflects the real runway split', () => {
+  const mod = loadBayEntryModule();
+  mod.setAPT(YBBN);
+
+  const key = 'VH-QOE';
+  // First poll ever seen for this aircraft: down near Redcliffe (real-world longitude ~153.114),
+  // well past the 12NM trust threshold. Against the old APT.lon divider this was only ~0.19NM
+  // west -- noise-level, and easily read as east/19L. Against the real runway-pair midpoint
+  // (BAY_DIVIDER_LON) it's a solid ~0.75NM west, which is the actual real-world signal: transits
+  // over the Caboolture/Redcliffe corridor land on 19R.
+  const firstPoll = {
+    lat: -27.23,
+    lon: 153.114,
+    track: 195,
+    _dist_nm: 14,
+  };
+
+  mod.recordBayEntryPosition(firstPoll, key);
+  const result = mod.estimateBayEntryEarly(firstPoll, key);
+  assert.deepEqual(result, { name: '19R', level: 'estimate' });
 });
 
 test('bay-entry estimate still fires correctly for a genuinely far-out west (Caboolture-side) entry', () => {
