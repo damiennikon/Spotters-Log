@@ -38,12 +38,23 @@ function loadRunwayChipHtml() {
 const runwayChipHtml = loadRunwayChipHtml();
 const ICON = '<svg-icon>';
 
-test('beyond 2NM with a raw runway guess shows the muted estimate chip', () => {
+test('beyond 2NM with a raw parallel-runway guess hedges instead of naming a side', () => {
   const html = runwayChipHtml(null, null, '19L', 'likely', ICON);
   assert.match(html, /tag-runway-estimate/);
   assert.doesNotMatch(html, /tag-runway-high/);
   assert.doesNotMatch(html, /tag-runway-likely"/); // not the confirmed "likely" class
-  assert.match(html, /RWY 19L</); // no "?" suffix — the muted style alone carries the distinction
+  // Parallel thresholds (19L/19R) sit under 1NM apart -- this far out an L/R guess is close to
+  // a coin flip, and in-memory lock/family state resets on reload, so don't name a specific side.
+  assert.doesNotMatch(html, /19L/);
+  assert.match(html, /Runway confirmation incoming/);
+});
+
+test('beyond 2NM with a raw non-parallel runway guess still shows the muted estimate chip', () => {
+  const html = runwayChipHtml(null, null, '01', 'likely', ICON);
+  assert.match(html, /tag-runway-estimate/);
+  assert.doesNotMatch(html, /tag-runway-high/);
+  assert.doesNotMatch(html, /Runway confirmation incoming/);
+  assert.match(html, /RWY 01</); // no L/R ambiguity to hedge on, so the guess is still named
 });
 
 test('<=2NM confirmed high-confidence runway keeps the existing locked style', () => {

@@ -2021,14 +2021,24 @@ function airlineNameFromFlight(flight) {
 
   // Picks the RWY chip's markup. `rwy`/`rwyLevel` are the gated (<=2NM, locked/confirmed) values;
   // `rawRwy`/`rawRwyLevel` are the same ungated values the spotting popup already uses. When the
-  // gated value is missing (still beyond 2NM) we still show the raw guess, but in a visually distinct
-  // muted/grey "estimate" style so it can never be mistaken for the confirmed high/likely chip.
+  // gated value is missing (still beyond 2NM) we still show a muted/grey "estimate" chip so it can
+  // never be mistaken for the confirmed high/likely chip -- but we only name the raw guess's actual
+  // side (e.g. "19L") when it's NOT a parallel-runway call. Parallel thresholds (19L/19R, 01L/01R)
+  // sit under 1NM apart, so an ungated L/R guess this far out is little better than a coin flip
+  // (see predictRunwayGeometry's MIN_LR_MARGIN_NM handling) -- and in-memory state (runwayLockCache,
+  // bayEntryCache, getRecentConfirmedFamily) resets on every page load, so a guess that looked solid
+  // before a reload can flip sides after one with no visual difference. Printing a specific letter
+  // here reads as fact, so hedge with a generic "confirming" message until the gated chip actually
+  // locks a side in close.
   function runwayChipHtml(rwy, rwyLevel, rawRwy, rawRwyLevel, icon) {
     if (rwy) {
       const cls = rwyLevel === 'high' ? 'tag-runway-high' : 'tag-runway-likely';
       return `<div class="tag tag-runway ${cls}">${icon}RWY ${rwy}</div>`;
     }
     if (rawRwy) {
+      if (/[LR]$/i.test(rawRwy)) {
+        return `<div class="tag tag-runway tag-runway-estimate">${icon}Runway confirmation incoming</div>`;
+      }
       return `<div class="tag tag-runway tag-runway-estimate">${icon}RWY ${rawRwy}</div>`;
     }
     return '';
