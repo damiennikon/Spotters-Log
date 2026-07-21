@@ -742,11 +742,12 @@ const runwayLockCache = new Map();
 
 // How far out a parallel-runway (L/R) guess is allowed to name a specific side in the muted
 // RWY chip, instead of the generic "Runway confirmation incoming" hedge (see runwayChipHtml
-// below). By this range the aircraft is established on final and genuinely tracking one side's
-// heading, so naming the guess is reasonable -- it just isn't yet trustworthy enough to lock
-// into runwayLockCache or promote to the confirmed high/likely chip style, which still waits
-// for the closer-in gate (2NM) applied in render().
-const RUNWAY_GUESS_NM = 5.0;
+// below). Set from real-world observation (not derived from the geometry logic itself): by
+// this range the aircraft is established on final and genuinely tracking one side's heading,
+// so naming the guess is reasonable -- it just isn't yet trustworthy enough to lock into
+// runwayLockCache or promote to the confirmed high/likely chip style, which still waits for
+// the closer-in gate (2NM) applied in render().
+const RUNWAY_GUESS_NM = 8.0;
 
 function getRunwayCacheKey(p) {
   return (p && (p.hex || p.icao24 || p.reg || p.callsign || p.flight || p.id)) || '';

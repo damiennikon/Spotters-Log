@@ -80,6 +80,13 @@ test('inside RUNWAY_GUESS_NM but beyond 2NM, a raw parallel-runway guess names t
   assert.match(html, /RWY 19R</);
 });
 
+test('at 7.5NM (inside the 8NM guess range), a raw parallel-runway guess names the side (muted)', () => {
+  const html = runwayChipHtml(null, null, '19L', 'likely', ICON, 7.5);
+  assert.match(html, /tag-runway-estimate/);
+  assert.doesNotMatch(html, /Runway confirmation incoming/);
+  assert.match(html, /RWY 19L</);
+});
+
 test('beyond RUNWAY_GUESS_NM with a raw non-parallel runway guess still shows the muted estimate chip', () => {
   const html = runwayChipHtml(null, null, '01', 'likely', ICON, 12.7);
   assert.match(html, /tag-runway-estimate/);
