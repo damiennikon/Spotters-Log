@@ -480,6 +480,7 @@
   // set the proxy filename here to match what exists on the server.
   // It will auto-fallback between proxy.php and proxy.php.
   const PROXY_CANDIDATES = ['./proxy.php'];
+  const ROUTE_PROXY = './routeset.php';
 
   // Airports (AU + NZ) – lightweight built-in list
 const AIRPORTS = [
@@ -2136,6 +2137,7 @@ function airlineNameFromFlight(flight) {
           <div>
             <div class="flight">${escapeHtml(pickLabel(it))}</div>
             ${(()=>{ const f=(it.flight||"").trim(); const an=airlineNameFromFlight(f); const tp=aircraftTypePretty(it.t); return `<div class="airline">${escapeHtml(an)}</div>${tp ? `<div class="atype">${escapeHtml(tp)}</div>` : ""}`; })()}
+            ${it._route ? `<div class="small route">${escapeHtml(it._route.origin)} → ${escapeHtml(it._route.destination)}</div>` : ''}
             <div class="small">${escapeHtml(pickSub(it))}</div>
           </div>
           <div class="cardBtns">
@@ -2291,6 +2293,62 @@ function airlineNameFromFlight(flight) {
     return Array.isArray(arr) ? arr : [];
   }
 
+  // ===== Route (origin/destination) lookup =====
+  // Callsign -> { origin, destination } | { miss: true }. A flight number's route doesn't
+  // change mid-flight, so this is cached indefinitely per session (misses too, so we don't
+  // re-query GA/unmatched callsigns every refresh cycle).
+  const routeCache = new Map();
+
+  async function fetchRoutes(list) {
+    const planes = [];
+    const seen = new Set();
+    for (const p of list) {
+      const cs = (p.flight || '').trim();
+      if (!cs || seen.has(cs) || routeCache.has(cs)) continue;
+      seen.add(cs);
+      if (typeof p.lat === 'number' && typeof p.lon === 'number') {
+        planes.push({ callsign: cs, lat: p.lat, lng: p.lon });
+      }
+    }
+    if (!planes.length) return;
+
+    const resp = await fetch(ROUTE_PROXY, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ planes }),
+      cache: 'no-store',
+    });
+    if (!resp.ok) throw new Error(`Route proxy HTTP ${resp.status}`);
+    const json = await resp.json();
+    const arr = Array.isArray(json) ? json : [];
+
+    const resolved = new Set();
+    for (const entry of arr) {
+      const cs = (entry && entry.callsign ? String(entry.callsign) : '').trim();
+      if (!cs) continue;
+      resolved.add(cs);
+      let origin = null, destination = null;
+      const airports = entry && Array.isArray(entry._airports) ? entry._airports : null;
+      if (airports && airports.length === 2) {
+        origin = airports[0].icao || airports[0].icao_code || null;
+        destination = airports[1].icao || airports[1].icao_code || null;
+      }
+      if ((!origin || !destination) && entry && typeof entry.airport_codes === 'string') {
+        const parts = entry.airport_codes.split('-');
+        if (parts.length === 2 && parts[0] && parts[1]) { origin = parts[0]; destination = parts[1]; }
+      }
+      if (entry && entry.plausible && origin && destination) {
+        routeCache.set(cs, { origin, destination });
+      } else {
+        routeCache.set(cs, { miss: true });
+      }
+    }
+    // Anything we asked for but got no entry back for is also a miss (nothing to retry on).
+    for (const cs of seen) {
+      if (!resolved.has(cs)) routeCache.set(cs, { miss: true });
+    }
+  }
+
   function computeEtaMin(distNm, gsKt) {
     // Simple ground-speed ETA. Conservative guards to avoid nonsense.
     if (!(typeof distNm === 'number') || !(typeof gsKt === 'number')) return null;
@@ -2348,6 +2406,13 @@ function airlineNameFromFlight(flight) {
           return (a._dist_nm || 1e9) - (b._dist_nm || 1e9);
         })
         .slice(0, LIMITS.maxResults);
+
+      await fetchRoutes(filtered).catch((e) => { console.error('Route lookup failed', e); });
+      for (const p of filtered) {
+        const cs = (p.flight || '').trim();
+        const r = cs ? routeCache.get(cs) : null;
+        p._route = (r && !r.miss) ? r : null;
+      }
 
       render(filtered);
 
