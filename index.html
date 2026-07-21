@@ -740,6 +740,14 @@ function shouldExcludeAmberleyTraffic(p, dToAptNm) {
 // so the UI does not flip from 'locked' (purple) to 'guess' (orange) near the threshold.
 const runwayLockCache = new Map();
 
+// How far out a parallel-runway (L/R) guess is allowed to name a specific side in the muted
+// RWY chip, instead of the generic "Runway confirmation incoming" hedge (see runwayChipHtml
+// below). By this range the aircraft is established on final and genuinely tracking one side's
+// heading, so naming the guess is reasonable -- it just isn't yet trustworthy enough to lock
+// into runwayLockCache or promote to the confirmed high/likely chip style, which still waits
+// for the closer-in gate (2NM) applied in render().
+const RUNWAY_GUESS_NM = 5.0;
+
 function getRunwayCacheKey(p) {
   return (p && (p.hex || p.icao24 || p.reg || p.callsign || p.flight || p.id)) || '';
 }
@@ -2020,15 +2028,26 @@ function airlineNameFromFlight(flight) {
   };
 
   // Picks the RWY chip's markup. `rwy`/`rwyLevel` are the gated (<=2NM, locked/confirmed) values;
-  // `rawRwy`/`rawRwyLevel` are the same ungated values the spotting popup already uses. When the
-  // gated value is missing (still beyond 2NM) we still show the raw guess, but in a visually distinct
-  // muted/grey "estimate" style so it can never be mistaken for the confirmed high/likely chip.
-  function runwayChipHtml(rwy, rwyLevel, rawRwy, rawRwyLevel, icon) {
+  // `rawRwy`/`rawRwyLevel` are the same ungated values the spotting popup already uses; `dnm` is
+  // the aircraft's current distance in NM. When the gated value is missing (still beyond 2NM) we
+  // still show a muted/grey "estimate" chip so it can never be mistaken for the confirmed
+  // high/likely chip -- but for a parallel-runway call (19L/19R, 01L/01R -- thresholds under 1NM
+  // apart) we only name the guessed side once inside RUNWAY_GUESS_NM, where the aircraft is
+  // established on final and genuinely tracking one side's heading. Beyond that range the guess is
+  // little better than a coin flip (see predictRunwayGeometry's MIN_LR_MARGIN_NM handling), and
+  // in-memory state (runwayLockCache, bayEntryCache, getRecentConfirmedFamily) resets on every
+  // page load, so a guess that looked solid before a reload can flip sides after one with no
+  // visual difference -- so hedge with a generic "confirming" message that far out instead.
+  function runwayChipHtml(rwy, rwyLevel, rawRwy, rawRwyLevel, icon, dnm) {
     if (rwy) {
       const cls = rwyLevel === 'high' ? 'tag-runway-high' : 'tag-runway-likely';
       return `<div class="tag tag-runway ${cls}">${icon}RWY ${rwy}</div>`;
     }
     if (rawRwy) {
+      const closeEnoughToGuess = (typeof dnm === 'number' && Number.isFinite(dnm) && dnm <= RUNWAY_GUESS_NM);
+      if (/[LR]$/i.test(rawRwy) && !closeEnoughToGuess) {
+        return `<div class="tag tag-runway tag-runway-estimate">${icon}Runway confirmation incoming</div>`;
+      }
       return `<div class="tag tag-runway tag-runway-estimate">${icon}RWY ${rawRwy}</div>`;
     }
     return '';
@@ -2146,7 +2165,7 @@ function airlineNameFromFlight(flight) {
           </div>
         </div>
 
-        <div class="tagRow"><div class="${tagClass}">${statusIcon}${statusText}</div>${runwayChipHtml(rwy, rwyLevel, rawRwy, rawRwyLevel, ICONS.runway)}${heavy ? `<div class="tag tag-heavy">${ICONS.heavy}Heavy</div>` : ''}</div>
+        <div class="tagRow"><div class="${tagClass}">${statusIcon}${statusText}</div>${runwayChipHtml(rwy, rwyLevel, rawRwy, rawRwyLevel, ICONS.runway, dnm)}${heavy ? `<div class="tag tag-heavy">${ICONS.heavy}Heavy</div>` : ''}</div>
         ${confBar}
 
         <div class="grid">
