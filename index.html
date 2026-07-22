@@ -1219,6 +1219,115 @@ function estimateBaySideCurrent(it, key) {
   }
 }
 
+// Tracks a run of consecutive 'high'-level predictRunwayGeometry() results for the SAME L/R
+// side, keyed the same way as the other per-aircraft caches. Unlike baySideHistoryCache (which
+// smooths a majority vote over a fixed-size rolling window), this is a pure streak: any poll
+// that is not a matching 'high' read -- a different side, a lower confidence level, or null --
+// resets it. Updated unconditionally on EVERY poll (see recordGeometryAgreement's call site in
+// predictRunwayForAircraft below), not gated behind whether a bay-side estimate already
+// answered -- that gating is exactly the bug this fixes: estimateBayEntryEarly's one-time
+// answer is checked and returned FIRST in predictRunwayForAircraft, so without this, a genuine,
+// sustained geometry disagreement never gets the chance to accumulate evidence at all before
+// dnm<=3 (see the QFA500/QLK329D real-world cases this was built for -- both broke the "usual"
+// bay-entry-side pattern, and the app had no way to notice until right before touchdown, or at
+// all).
+const geometryAgreementCache = new Map();
+const GEOMETRY_AGREEMENT_STORE_KEY = "photolog_geometry_agreement_v1";
+
+// How many consecutive qualifying 'high' reads (same side, no contradicting or non-high read in
+// between) are required before a sustained disagreement is allowed to override the bay-side
+// "usual pattern" guess. Commit b8736b4 (see runway-prediction.test.js's "Fix 1 regression"
+// test) was reverted specifically because a SINGLE high-confidence geometry read, while still
+// transiting the bay, was wrongly trusted -- that poisoned scenario only ever produces one such
+// read. Requiring >=3 makes a single blip structurally incapable of triggering the override,
+// while 3 genuinely sustained polls is still well ahead of the existing dnm<=3 cutoff.
+const GEOMETRY_AGREEMENT_MIN_STREAK = 3;
+
+// At typical final-approach groundspeeds (~130-180kt) consecutive ~10s polls (AUTO_REFRESH_MS)
+// already cover roughly this much distance -- this mostly guards against a burst of several
+// polls landing within seconds of each other (e.g. after a reconnect/backoff catch-up) being
+// mistaken for "sustained" evidence spread over real time and distance.
+const GEOMETRY_AGREEMENT_MIN_SPAN_NM = 1.0;
+
+function pruneGeometryAgreementCache(activeKeys) {
+  const now = Date.now();
+  const TTL_MS = 20 * 60 * 1000; // 20 minutes, same as the other per-aircraft caches
+  for (const [k, v] of geometryAgreementCache.entries()) {
+    if (!k) { geometryAgreementCache.delete(k); continue; }
+    if (activeKeys && !activeKeys.has(k) && (now - (v.ts || 0)) > TTL_MS) {
+      geometryAgreementCache.delete(k);
+    }
+  }
+}
+
+// Persist across reloads, same reasoning as saveBaySideHistoryCache above.
+function saveGeometryAgreementCache() {
+  try {
+    const icao = (APT && APT.icao) ? String(APT.icao).toUpperCase() : '';
+    if (!icao) return;
+    localStorage.setItem(GEOMETRY_AGREEMENT_STORE_KEY,
+      JSON.stringify({ icao, entries: Array.from(geometryAgreementCache.entries()) }));
+  } catch {}
+}
+
+function loadGeometryAgreementCache() {
+  try {
+    const icao = (APT && APT.icao) ? String(APT.icao).toUpperCase() : '';
+    if (!icao) return;
+    const raw = localStorage.getItem(GEOMETRY_AGREEMENT_STORE_KEY);
+    if (!raw) return;
+    const o = JSON.parse(raw);
+    if (!o || typeof o !== 'object' || o.icao !== icao || !Array.isArray(o.entries)) return;
+    for (const [k, v] of o.entries) {
+      if (k && v && typeof v.ts === 'number' && typeof v.name === 'string' &&
+          typeof v.count === 'number') {
+        geometryAgreementCache.set(k, v);
+      }
+    }
+    pruneGeometryAgreementCache(new Set());
+  } catch {}
+}
+
+// Records this poll's geometry result into the streak (see geometryAgreementCache above).
+// Deliberately called on EVERY predictRunwayForAircraft() invocation, unconditionally.
+// "Agreement" only ever means a 'high'-level, L/R-suffixed result -- predictRunwayGeometry's
+// non-parallel-runway or non-high results say nothing about which specific side has converged,
+// so they neither extend nor are meaningful to a streak; they reset it, same as an outright
+// contradiction.
+function recordGeometryAgreement(key, precise, dnm) {
+  if (!key) return;
+  const name = (precise && precise.level === 'high' && /[LR]$/i.test(String(precise.name || '')))
+    ? precise.name : null;
+  if (!name) { geometryAgreementCache.delete(key); return; }
+  const prev = geometryAgreementCache.get(key);
+  if (prev && prev.name === name) {
+    prev.count += 1;
+    if (typeof dnm === 'number' && Number.isFinite(dnm)) prev.lastDnm = dnm;
+    prev.ts = Date.now();
+  } else {
+    geometryAgreementCache.set(key, {
+      name,
+      count: 1,
+      firstDnm: (typeof dnm === 'number' && Number.isFinite(dnm)) ? dnm : null,
+      lastDnm: (typeof dnm === 'number' && Number.isFinite(dnm)) ? dnm : null,
+      ts: Date.now(),
+    });
+  }
+}
+
+// Returns the side ('19L'/'19R') that geometry has SUSTAINED agreement on for this key, or null
+// if the streak doesn't yet qualify (too short, or too bunched-up in distance -- see the two
+// constants above). Read-only -- does not mutate geometryAgreementCache.
+function getSustainedGeometrySide(key) {
+  if (!key) return null;
+  const e = geometryAgreementCache.get(key);
+  if (!e || e.count < GEOMETRY_AGREEMENT_MIN_STREAK) return null;
+  if (!(typeof e.firstDnm === 'number' && typeof e.lastDnm === 'number')) return null;
+  const span = e.firstDnm - e.lastDnm; // positive as the aircraft closes in (dnm decreasing)
+  if (!(span >= GEOMETRY_AGREEMENT_MIN_SPAN_NM)) return null;
+  return e.name;
+}
+
 function predictRunwayGeometry(it) {
   try {
     const icao = (APT && APT.icao) ? String(APT.icao).toUpperCase() : '';
@@ -1505,24 +1614,54 @@ function predictRunwayGeometry(it) {
 // never subject to this check -- it's real cross-track-verified evidence for THIS aircraft
 // and always wins. When there's no recent confirmed evidence yet, this is a no-op and
 // behavior is unchanged.
+//
+// One more override sits between the <=3NM short-circuit above and the bay-side estimates:
+// getSustainedGeometrySide() (see geometryAgreementCache above). getRecentConfirmedFamily()
+// can only ever catch a 19-vs-01 mixup (extractRunwayFamily collapses 19L/19R to the same
+// family), so outside <=3NM there was previously NO way for an aircraft that genuinely breaks
+// the "usual" bay-entry-side pattern (e.g. entering from the east but landing 19R instead of
+// the usual 19L) to ever correct before touchdown -- estimateBayEntryEarly's answer is fixed
+// from the aircraft's first tracked position and returned unconditionally for the whole
+// dnm∈(2,18] window, which also means estimateBaySideCurrent's own majority-vote history never
+// even gets a chance to run for the common case (first poll >=12NM out). A single contradicting
+// 'high' geometry read still isn't trusted here -- that's exactly the shape of bug commit
+// b8736b4 fixed (QLK365D flipped wrong on one misleading close read while still transiting the
+// bay) -- but a genuinely SUSTAINED run of them (GEOMETRY_AGREEMENT_MIN_STREAK consecutive
+// 'high' reads for the same side, spread over GEOMETRY_AGREEMENT_MIN_SPAN_NM of real closing
+// distance) is strong enough evidence to win early.
 function predictRunwayForAircraft(it) {
   const key = getRunwayCacheKey(it);
   recordBayEntryPosition(it, key);
 
   const precise = predictRunwayGeometry(it);
+  const dnm = it._dist_nm;
+
+  // Unconditional, every poll -- see recordGeometryAgreement's comment above for why this must
+  // not be gated behind whether a bay-side estimate already answered.
+  recordGeometryAgreement(key, precise, dnm);
 
   const activeFamily = getRecentConfirmedFamily();
   const contradictsActiveFamily = (result) =>
     !!(result && activeFamily && extractRunwayFamily(result.name) !== activeFamily);
 
-  const dnm = it._dist_nm;
   if (precise && precise.level === 'high' && typeof dnm === 'number' && dnm <= 3) return precise;
 
+  // Non-null only when THIS poll's own geometry is itself 'high' on that side too -- a single
+  // non-matching read resets the streak in recordGeometryAgreement above -- so returning
+  // `precise` below always returns a fresh, genuinely 'high' result, never a stale one.
+  const sustainedSide = getSustainedGeometrySide(key);
+
   const bayEstimate = estimateBayEntryEarly(it, key);
-  if (bayEstimate && !contradictsActiveFamily(bayEstimate)) return bayEstimate;
+  if (bayEstimate && !contradictsActiveFamily(bayEstimate)) {
+    if (sustainedSide && sustainedSide !== bayEstimate.name) return precise;
+    return bayEstimate;
+  }
 
   const bayEstimateCurrent = estimateBaySideCurrent(it, key);
-  if (bayEstimateCurrent && !contradictsActiveFamily(bayEstimateCurrent)) return bayEstimateCurrent;
+  if (bayEstimateCurrent && !contradictsActiveFamily(bayEstimateCurrent)) {
+    if (sustainedSide && sustainedSide !== bayEstimateCurrent.name) return precise;
+    return bayEstimateCurrent;
+  }
 
   if (precise && precise.level === 'high') return precise;
 
@@ -1560,6 +1699,7 @@ let APT = loadAirport() || DEFAULT_APT;
 loadRunwayLockCache();
 loadBayEntryCache();
 loadBaySideHistoryCache();
+loadGeometryAgreementCache();
 
 function updateAirportHeader() {
   const $name = document.getElementById("aptName");
@@ -1916,20 +2056,22 @@ function renderAirportPicker(filterText){
 
 
 
-// runwayLockCache/bayEntryCache/baySideHistoryCache entries only ever mean anything relative to
-// the airport they were recorded under (a runway name like '19L' or a recorded bay-entry
-// longitude is meaningless -- or worse, silently misleading -- once compared against a different
-// airport's geometry). This matters more now than it used to: runwayLockCache also backs
-// getRecentConfirmedFamily()'s cross-aircraft "what's actually active" signal, so a stale
-// entry surviving an airport switch could wrongly suppress legitimate calls at the newly
+// runwayLockCache/bayEntryCache/baySideHistoryCache/geometryAgreementCache entries only ever
+// mean anything relative to the airport they were recorded under (a runway name like '19L' or a
+// recorded bay-entry longitude is meaningless -- or worse, silently misleading -- once compared
+// against a different airport's geometry). This matters more now than it used to: runwayLockCache
+// also backs getRecentConfirmedFamily()'s cross-aircraft "what's actually active" signal, so a
+// stale entry surviving an airport switch could wrongly suppress legitimate calls at the newly
 // selected airport for up to ACTIVE_FAMILY_FRESH_MS.
 function resetRunwayPredictionCaches() {
   runwayLockCache.clear();
   bayEntryCache.clear();
   baySideHistoryCache.clear();
+  geometryAgreementCache.clear();
   try { localStorage.removeItem(RUNWAY_LOCK_STORE_KEY); } catch {}
   try { localStorage.removeItem(BAY_ENTRY_STORE_KEY); } catch {}
   try { localStorage.removeItem(BAY_SIDE_HISTORY_STORE_KEY); } catch {}
+  try { localStorage.removeItem(GEOMETRY_AGREEMENT_STORE_KEY); } catch {}
 }
 
 function applySelectedAirport(apt) {
@@ -2499,9 +2641,11 @@ function airlineNameFromFlight(flight) {
     pruneRunwayLockCache(activeKeys);
     pruneBayEntryCache(activeKeys);
     pruneBaySideHistoryCache(activeKeys);
+    pruneGeometryAgreementCache(activeKeys);
     saveRunwayLockCache();
     saveBayEntryCache();
     saveBaySideHistoryCache();
+    saveGeometryAgreementCache();
   }
 
   function showSpotModal(runwayName, flightLabel, level) {
