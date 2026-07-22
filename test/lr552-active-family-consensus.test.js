@@ -99,6 +99,7 @@ function loadModule() {
   const pieces = [
     extractConstObject(html, 'RUNWAYS'),
     extractConstObject(html, 'ARCHERFIELD'),
+    extractStatement(html, 'const ARCHERFIELD_DIVIDER_LON ='),
     extractFunction(html, 'archerfieldDividerLon'),
     extractStatement(html, 'const EARLY_CALL_MAX_ALT_FT_PER_NM ='),
     extractBalancedConst(html, 'BAY_DIVIDER_LON'),
