@@ -1332,13 +1332,23 @@ function predictRunwayGeometry(it) {
 }
 
 // Records this aircraft's earliest position for the bay-entry estimate above, then runs the
-// precise cross-track geometry. The geometry wins whenever it's 'high' confidence (which, for
-// L/R pairs, already implies the margin check above passed). Below that -- including a null
-// result -- the bay-entry estimate gets a chance to fill the gap; if it doesn't apply (wrong
-// airport, wrong heading family, no recorded entry yet), we fall back to whatever the geometry
-// produced.
+// precise cross-track geometry. For a YBBN 19-family approach between roughly 2NM and 18NM,
+// the bay-side evidence (earliest-entry, then current-position) is checked and preferred BEFORE
+// even a 'high'-confidence geometry result -- confirmed live and repeatedly (not a one-off):
+// the cross-track projection onto each runway's extended centerline can read comfortably
+// 'high' confidence for the wrong side while the aircraft is still transiting across the bay,
+// well before it has actually turned onto final -- a large margin between the two centerlines'
+// cross-track distances measures "clearly closer to this line right now", not "this is the
+// side it will land on". The simple real-world-validated east/west divider signal doesn't have
+// that failure mode. Both bay-side checks self-exclude at <=2NM (see their own dnm>2 guard), so
+// inside that range -- where the geometry has actually converged, matching the runwayLockCache
+// locking gate at <=3NM -- a 'high' geometry result takes over as before.
 //
-// Any non-'high' guess (geometry's early-call heuristics, or the bay-entry estimate) is also
+// Below 'high' -- including a null result, or outside the bay-side checks' distance/family
+// window (e.g. 01-family approaches, or other airports where they always return null) -- we
+// fall back to whatever the geometry produced.
+//
+// Any non-'high' guess (geometry's early-call heuristics, or the bay-side estimates) is also
 // checked against getRecentConfirmedFamily(): track+position alone can make an aircraft still
 // transiting toward the field look like it matches a runway family it has no intention of
 // using (e.g. heading north toward BNE from the south looks like a 01 final even on a day
@@ -1351,7 +1361,6 @@ function predictRunwayForAircraft(it) {
   recordBayEntryPosition(it, key);
 
   const precise = predictRunwayGeometry(it);
-  if (precise && precise.level === 'high') return precise;
 
   const activeFamily = getRecentConfirmedFamily();
   const contradictsActiveFamily = (result) =>
@@ -1362,6 +1371,8 @@ function predictRunwayForAircraft(it) {
 
   const bayEstimateCurrent = estimateBaySideCurrent(it);
   if (bayEstimateCurrent && !contradictsActiveFamily(bayEstimateCurrent)) return bayEstimateCurrent;
+
+  if (precise && precise.level === 'high') return precise;
 
   if (precise && !contradictsActiveFamily(precise)) return precise;
 
