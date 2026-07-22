@@ -928,6 +928,33 @@ const BAY_DIVIDER_LON = (() => {
   return (l && r) ? (l.thrLon + r.thrLon) / 2 : 153.1175;
 })();
 
+// Distance-scaled correction to BAY_DIVIDER_LON, used by both estimateBayEntryEarly() and
+// estimateBaySideCurrent() below. BAY_DIVIDER_LON is anchored at the runway thresholds, but
+// Moreton Bay lies entirely east of the airport, so aircraft on EITHER 19-family corridor read
+// "east of the airport" until close-in -- a fixed divider can't separate corridors that are
+// several NM apart far out but converge under 1NM apart close-in (which is exactly the range
+// predictRunwayGeometry's cross-track method already handles).
+//
+// Calibrated from 12 FR24-traced reference points (6 per side, Google-Maps-verified), covering
+// both the 19R (west/Caboolture) and 19L (east/Moreton Island) corridors from ~2NM to ~14.7NM
+// out. The two corridors stay a near-constant ~1.0-1.1NM apart across that whole range, and the
+// true midline between them shifts east essentially linearly with distance (least-squares fit,
+// residuals <0.01NM at every calibration point):
+//   midpoint_offset_nm(dnm) = BAY_DIVIDER_SLOPE_NM_PER_NM*dnm + BAY_DIVIDER_INTERCEPT_NM
+const BAY_DIVIDER_SLOPE_NM_PER_NM = 0.4552;
+const BAY_DIVIDER_INTERCEPT_NM = -0.5972;
+
+function bayDividerLon(dnm, lat0) {
+  if (!(typeof dnm === 'number' && Number.isFinite(dnm) && dnm > 0) ||
+      !(typeof lat0 === 'number' && Number.isFinite(lat0))) {
+    return BAY_DIVIDER_LON;
+  }
+  const cappedDnm = Math.min(dnm, 20); // no calibration data beyond ~14.7NM; cap rather than extrapolate
+  const offsetNm = BAY_DIVIDER_SLOPE_NM_PER_NM * cappedDnm + BAY_DIVIDER_INTERCEPT_NM;
+  const degPerNm = 1 / (60 * Math.cos(lat0 * Math.PI / 180));
+  return BAY_DIVIDER_LON + offsetNm * degPerNm;
+}
+
 // A "first ever poll" captured too close to BAY_DIVIDER_LON is in the ambiguous zone for the
 // east/west check below -- an aircraft truly approaching from one side can still read as
 // marginally on the other if the app didn't start tracking it until it had already curved that
@@ -1046,13 +1073,16 @@ function estimateBayEntryEarly(it, key) {
     if (!(typeof entry.dnm === 'number' && entry.dnm >= BAY_ENTRY_MIN_DIST_NM)) return null;
 
     // Distance-out alone isn't enough -- also require the entry point to be a meaningful
-    // distance from BAY_DIVIDER_LON itself (see BAY_ENTRY_MIN_LON_OFFSET_NM above), otherwise a
+    // distance from the divider itself (see BAY_ENTRY_MIN_LON_OFFSET_NM above), otherwise a
     // technically-far-out-but-longitude-marginal first poll is just as ambiguous as a close-in
-    // Redcliffe one.
-    const entryLonOffsetNm = Math.abs(entry.lon - BAY_DIVIDER_LON) * Math.cos(APT.lat * Math.PI / 180) * 60;
+    // Redcliffe one. Use the distance-scaled divider (bayDividerLon), not the bare
+    // BAY_DIVIDER_LON -- see its comment above for why a fixed longitude can't correctly split
+    // the two corridors this far out.
+    const divider = bayDividerLon(entry.dnm, APT.lat);
+    const entryLonOffsetNm = Math.abs(entry.lon - divider) * Math.cos(APT.lat * Math.PI / 180) * 60;
     if (!(entryLonOffsetNm >= BAY_ENTRY_MIN_LON_OFFSET_NM)) return null;
 
-    const side = (entry.lon > BAY_DIVIDER_LON) ? '19L' : '19R';
+    const side = (entry.lon > divider) ? '19L' : '19R';
     return { name: side, level: 'estimate' };
   } catch (e) {
     return null;
@@ -1154,11 +1184,14 @@ function estimateBaySideCurrent(it, key) {
     if (angleDiffDeg(track, 190) >= angleDiffDeg(track, 10)) return null;
 
     // Same confidence buffer as the entry check -- must be a meaningful distance from the
-    // divider, not just marginally on one side (ordinary position noise near the line).
-    const lonOffsetNm = Math.abs(lon0 - BAY_DIVIDER_LON) * Math.cos(APT.lat * Math.PI / 180) * 60;
+    // divider, not just marginally on one side (ordinary position noise near the line). Use the
+    // distance-scaled divider (bayDividerLon), not the bare BAY_DIVIDER_LON -- see its comment
+    // above for why a fixed longitude can't correctly split the two corridors this far out.
+    const divider = bayDividerLon(dnm, APT.lat);
+    const lonOffsetNm = Math.abs(lon0 - divider) * Math.cos(APT.lat * Math.PI / 180) * 60;
     if (!(lonOffsetNm >= BAY_ENTRY_MIN_LON_OFFSET_NM)) return null;
 
-    const side = (lon0 > BAY_DIVIDER_LON) ? '19L' : '19R';
+    const side = (lon0 > divider) ? '19L' : '19R';
 
     const k = key || getRunwayCacheKey(it);
     if (!k) return { name: side, level: 'estimate' };

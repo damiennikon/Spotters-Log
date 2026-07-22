@@ -97,6 +97,9 @@ function loadModule() {
   const pieces = [
     extractConstObject(html, 'RUNWAYS'),
     extractBalancedConst(html, 'BAY_DIVIDER_LON'),
+    extractStatement(html, 'const BAY_DIVIDER_SLOPE_NM_PER_NM ='),
+    extractStatement(html, 'const BAY_DIVIDER_INTERCEPT_NM ='),
+    extractFunction(html, 'bayDividerLon'),
     extractStatement(html, 'const BAY_ENTRY_MIN_DIST_NM ='),
     extractStatement(html, 'const BAY_ENTRY_MIN_LON_OFFSET_NM ='),
     extractStatement(html, 'const BAY_SIDE_HISTORY_MAX_POLLS ='),
@@ -157,15 +160,21 @@ const firstPoll = { reg: 'VH-QOE', lat: -27.15, lon: 153.128, track: 185, _dist_
 // HIGH-confidence gate (<=18 degrees) isn't met even though it already picks the correct side.
 const laterPoll = { reg: 'VH-QOE', lat: -27.2708, lon: 153.1390, track: 212, _dist_nm: 6.9 };
 
-test('QLK379D repro: a first poll past the 12NM distance gate but only marginally east of APT.lon must not produce a confident side guess', () => {
+test('QLK379D repro: a first poll past the 12NM distance gate now resolves correctly against the distance-scaled divider', () => {
   const mod = loadPredictor();
   mod.recordBayEntryPosition(firstPoll, 'VH-QOE');
 
   const entry = mod.bayEntryCache.get('VH-QOE');
   assert.ok(entry.dnm >= 12, 'sanity: entry clears BAY_ENTRY_MIN_DIST_NM');
 
+  // Against the old fixed BAY_DIVIDER_LON this point (~0.56NM east of it) was only marginally
+  // east -- ambiguous, so estimateBayEntryEarly returned null rather than risk a wrong call.
+  // Against the distance-scaled divider (bayDividerLon), the true corridor midline at 13.4NM
+  // out is itself several NM further east (see index.html's BAY_DIVIDER_SLOPE_NM_PER_NM
+  // comment), so this same point reads solidly west/19R -- no longer marginal at all.
   const result = mod.estimateBayEntryEarly(laterPoll, 'VH-QOE');
-  assert.equal(result, null, 'a longitude-marginal entry point must not produce a confident side guess even past the distance gate');
+  assert.deepEqual(result, { name: '19R', level: 'estimate' },
+    'the distance-scaled divider now confidently and correctly resolves this as 19R');
 });
 
 test('QLK379D repro: predictRunwayGeometry alone already gets the correct side (19R) at 6.9NM, just not at high confidence', () => {
@@ -175,36 +184,37 @@ test('QLK379D repro: predictRunwayGeometry alone already gets the correct side (
   assert.notEqual(result && result.level, 'high', 'sanity: this repro depends on geometry NOT reaching high confidence here');
 });
 
-test('QLK379D repro: the longitude-marginal bay-entry estimate itself never overrides the correct-but-non-high geometry call', () => {
+test('QLK379D repro: the bay-entry estimate resolves correctly even from a single bare snapshot, no poll history needed', () => {
   const mod = loadPredictor();
 
   const result = mod.predictRunwayForAircraft(firstPoll);
   assert.notEqual(result && result.name, '19L', 'first poll itself should not be mislabelled either');
 
   const finalResult = mod.predictRunwayForAircraft(laterPoll);
-  // Two bare snapshots with nothing in between: estimateBayEntryEarly (the longitude-marginal
-  // bay-ENTRY estimate this test is named for) stays null throughout, as established above --
-  // that part of the original bug is fixed unconditionally. But jumping straight from 13.4NM to
-  // 6.9NM with no polls in between also means estimateBaySideCurrent's majority-vote history
-  // (see BAY_SIDE_HISTORY_MAX_POLLS) never gets a chance to build up: this later poll is the
-  // very FIRST qualifying bay-side-current reading for this aircraft, so it's necessarily also
-  // the whole "majority" on its own. Smoothing a transient crossing needs actual prior history
-  // to smooth against -- see the next test for the realistic poll-stream reconstruction where
-  // that history exists and the flip is actually prevented.
-  assert.deepEqual(finalResult, { name: '19L', level: 'estimate' });
+  // Two bare snapshots with nothing in between, no poll history to smooth over a transient
+  // crossing: under the old fixed divider this used to flip to the wrong side (19L) here,
+  // because the longitude-marginal bay-ENTRY estimate stayed null and estimateBaySideCurrent's
+  // single, unsmoothed 6.9NM reading (transiently ~0.58NM east of the old divider) won by
+  // default. Under the distance-scaled divider, the bay-ENTRY estimate itself already resolves
+  // confidently and correctly from the cached 13.4NM entry point (see the test above) -- so it
+  // wins outright and this scenario no longer depends on majority-vote history at all.
+  assert.deepEqual(finalResult, { name: '19R', level: 'estimate' });
 });
 
 // The two real reported snapshots above (13.4NM and 6.9NM) are ~6.5NM of real flight time apart
 // -- in practice there are many polls in between, most of them west of BAY_DIVIDER_LON, matching
 // the real-world Caboolture/Redcliffe-corridor-entry pattern this aircraft is actually flying
-// (see estimateBayEntryEarly's comment above). This reconstructs that fuller poll stream:
-// estimateBaySideCurrent() now also decides by majority side over its recent-poll history (see
-// baySideHistoryCache / BAY_SIDE_HISTORY_MAX_POLLS), so once that history is genuinely built up
-// west of the divider, the later poll's transient eastward read (the same ~0.58NM-east snapshot
-// used above, still settling out of a turn) is correctly outvoted instead of flipping the
-// answer -- reproducing, end-to-end, why the reported 19L misclassification doesn't recur once
-// there's real poll history behind it.
-test('QLK379D repro: with a realistic poll stream in between, the transient eastward snapshot at 6.9NM is outvoted and the wrapper stays on 19R', () => {
+// (see estimateBayEntryEarly's comment above). This reconstructs that fuller poll stream.
+//
+// Under the old fixed divider, this scenario needed estimateBaySideCurrent's majority-vote
+// history (see baySideHistoryCache / BAY_SIDE_HISTORY_MAX_POLLS) to outvote the transient
+// eastward 6.9NM snapshot. Under the distance-scaled divider, the bay-ENTRY estimate itself
+// already resolves confidently and correctly from the very first qualifying poll (13.4NM) --
+// see the first test above -- so it wins outright on every subsequent poll for this aircraft,
+// including the transient one, without ever needing estimateBaySideCurrent or its history to
+// run at all. This confirms the fix holds throughout a realistic poll stream, via the simpler
+// (and now more robust) mechanism.
+test('QLK379D repro: with a realistic poll stream in between, the confident bay-entry estimate keeps the wrapper on 19R throughout, including the transient 6.9NM snapshot', () => {
   const mod = loadPredictor();
 
   const pollA = { reg: 'VH-QOE', lat: -27.19, lon: 153.117, track: 193, _dist_nm: 11.5 };
@@ -217,12 +227,15 @@ test('QLK379D repro: with a realistic poll stream in between, the transient east
     assert.equal(r && r.name, '19R', `sanity: poll at ${p._dist_nm}NM should already read 19R`);
   }
 
+  // The confident bay-entry estimate short-circuits predictRunwayForAircraft before
+  // estimateBaySideCurrent ever runs for this aircraft, so no majority-vote history builds up
+  // -- that's expected now, not a regression (see comment above).
   const hist = mod.baySideHistoryCache.get('VH-QOE');
-  assert.deepEqual(hist && hist.sides, ['19R', '19R', '19R'], 'sanity: three west-side votes recorded before the transient poll');
+  assert.equal(hist, undefined, 'sanity: estimateBaySideCurrent never needs to run once the bay-entry estimate is confident');
 
   const finalResult = mod.predictRunwayForAircraft(laterPoll);
   assert.deepEqual(finalResult, { name: '19R', level: 'estimate' },
-    'majority-vote history (3x 19R vs 1x transient 19L) must keep the call on 19R instead of flipping');
+    'the confident bay-entry estimate keeps the call on 19R for the transient poll too, instead of flipping');
 });
 
 test('bay-entry estimate still fires correctly for a genuinely far-out west (Caboolture-side) entry (no regression)', () => {
