@@ -103,12 +103,14 @@ function loadModule() {
     extractBalancedConst(html, 'BAY_DIVIDER_LON'),
     extractStatement(html, 'const BAY_ENTRY_MIN_DIST_NM ='),
     extractStatement(html, 'const BAY_ENTRY_MIN_LON_OFFSET_NM ='),
+    extractStatement(html, 'const BAY_SIDE_HISTORY_MAX_POLLS ='),
     extractStatement(html, 'const ACTIVE_FAMILY_FRESH_MS ='),
     extractFunction(html, 'angleDiffDeg'),
     extractFunction(html, 'bearingDeg'),
     extractFunction(html, 'predictRunwayGeometry'),
     extractFunction(html, 'recordBayEntryPosition'),
     extractFunction(html, 'estimateBayEntryEarly'),
+    extractFunction(html, 'estimateBaySideCurrent'),
     extractFunction(html, 'getRunwayCacheKey'),
     extractFunction(html, 'extractRunwayFamily'),
     extractFunction(html, 'getRecentConfirmedFamily'),
@@ -120,6 +122,7 @@ function loadModule() {
     let APT = null;
     const bayEntryCache = new Map();
     const runwayLockCache = new Map();
+    const baySideHistoryCache = new Map();
     ${pieces}
     return {
       predictRunwayGeometry,
@@ -128,6 +131,7 @@ function loadModule() {
       resetRunwayPredictionCaches,
       bayEntryCache,
       runwayLockCache,
+      baySideHistoryCache,
       setAPT: (apt) => { APT = apt; },
     };
   })`;
@@ -207,16 +211,19 @@ test('a high-confidence geometry result is never suppressed, even when it contra
   assert.deepEqual(result, { name: '19R', level: 'high' });
 });
 
-test('resetRunwayPredictionCaches() empties both runwayLockCache and bayEntryCache', () => {
+test('resetRunwayPredictionCaches() empties runwayLockCache, bayEntryCache, and baySideHistoryCache', () => {
   const mod = loadPredictor();
   mod.runwayLockCache.set('SOME-FLIGHT', { name: '19L', ts: Date.now() });
   mod.bayEntryCache.set('SOME-FLIGHT', { lat: -27.2, lon: 153.1, dnm: 14, ts: Date.now() });
+  mod.baySideHistoryCache.set('SOME-FLIGHT', { sides: ['19R'], ts: Date.now() });
 
   assert.equal(mod.runwayLockCache.size, 1);
   assert.equal(mod.bayEntryCache.size, 1);
+  assert.equal(mod.baySideHistoryCache.size, 1);
 
   mod.resetRunwayPredictionCaches();
 
   assert.equal(mod.runwayLockCache.size, 0);
   assert.equal(mod.bayEntryCache.size, 0);
+  assert.equal(mod.baySideHistoryCache.size, 0);
 });

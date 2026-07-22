@@ -1033,6 +1033,62 @@ function estimateBayEntryEarly(it, key) {
   }
 }
 
+// Recent-position history for estimateBaySideCurrent() below (YBBN 19-family only), keyed the
+// same way as bayEntryCache/runwayLockCache. A single current-position snapshot can't tell
+// "temporarily on this side mid-vector" from "actually landing on this side": real Brisbane
+// 19-family traffic gets vectored laterally during the approach (e.g. entering from the west,
+// drifting east while intercepting, then settling back onto the 19R centerline), so an aircraft
+// genuinely landing 19R can transiently read east of BAY_DIVIDER_LON mid-vector, well before
+// it's actually converged. See estimateBaySideCurrent()'s majority-vote use of this below.
+const baySideHistoryCache = new Map();
+const BAY_SIDE_HISTORY_STORE_KEY = "photolog_bay_side_history_v1";
+
+// How many recent qualifying polls estimateBaySideCurrent() remembers per aircraft for the
+// majority vote below. Wide enough to ride out a multi-poll mid-vector excursion to the
+// "wrong" side of BAY_DIVIDER_LON, narrow enough that a genuine, sustained side change still
+// flips the vote within a handful of polls rather than dragging on indefinitely.
+const BAY_SIDE_HISTORY_MAX_POLLS = 7;
+
+function pruneBaySideHistoryCache(activeKeys) {
+  const now = Date.now();
+  const TTL_MS = 20 * 60 * 1000; // 20 minutes, same as the other per-aircraft caches
+  for (const [k, v] of baySideHistoryCache.entries()) {
+    if (!k) { baySideHistoryCache.delete(k); continue; }
+    if (activeKeys && !activeKeys.has(k) && (now - (v.ts || 0)) > TTL_MS) {
+      baySideHistoryCache.delete(k);
+    }
+  }
+}
+
+// Persist across reloads, same reasoning as saveBayEntryCache above -- a reload mid-approach
+// shouldn't throw away the recent-poll history and silently revert to single-snapshot behavior.
+function saveBaySideHistoryCache() {
+  try {
+    const icao = (APT && APT.icao) ? String(APT.icao).toUpperCase() : '';
+    if (!icao) return;
+    localStorage.setItem(BAY_SIDE_HISTORY_STORE_KEY,
+      JSON.stringify({ icao, entries: Array.from(baySideHistoryCache.entries()) }));
+  } catch {}
+}
+
+function loadBaySideHistoryCache() {
+  try {
+    const icao = (APT && APT.icao) ? String(APT.icao).toUpperCase() : '';
+    if (!icao) return;
+    const raw = localStorage.getItem(BAY_SIDE_HISTORY_STORE_KEY);
+    if (!raw) return;
+    const o = JSON.parse(raw);
+    if (!o || typeof o !== 'object' || o.icao !== icao || !Array.isArray(o.entries)) return;
+    for (const [k, v] of o.entries) {
+      if (k && v && typeof v.ts === 'number' && Array.isArray(v.sides)) {
+        baySideHistoryCache.set(k, v);
+      }
+    }
+    // Drop anything already stale so an old payload can't revive a stale vote.
+    pruneBaySideHistoryCache(new Set());
+  } catch {}
+}
+
 // Same divider/confidence logic as estimateBayEntryEarly, but reads the aircraft's CURRENT
 // position instead of a cached earliest-entry one -- so it doesn't depend on ever having
 // captured a valid entry (which requires a poll at >= BAY_ENTRY_MIN_DIST_NM, and is often
@@ -1043,7 +1099,14 @@ function estimateBayEntryEarly(it, key) {
 // "closest centerline" and "which side of the bay" are not the same computation until the
 // aircraft has actually converged. This current-position check is the same reliable signal as
 // the entry-based one, just evaluated every poll instead of only once, early.
-function estimateBaySideCurrent(it) {
+//
+// Decides by MAJORITY side over a short rolling window of recent qualifying polls (see
+// baySideHistoryCache above), not the latest point alone -- a single snapshot can't distinguish
+// a real mid-vector excursion to the other side of BAY_DIVIDER_LON from an aircraft that is
+// actually landing on that side. Still evaluated -- and able to change its answer -- on every
+// poll, which is the whole point this check exists for; the history just smooths out a
+// transient crossing instead of reacting to it as if it were the final answer.
+function estimateBaySideCurrent(it, key) {
   try {
     const icao = (APT && APT.icao) ? String(APT.icao).toUpperCase() : '';
     if (icao !== 'YBBN' || !APT || typeof APT.lat !== 'number' || typeof APT.lon !== 'number') return null;
@@ -1070,7 +1133,28 @@ function estimateBaySideCurrent(it) {
     if (!(lonOffsetNm >= BAY_ENTRY_MIN_LON_OFFSET_NM)) return null;
 
     const side = (lon0 > BAY_DIVIDER_LON) ? '19L' : '19R';
-    return { name: side, level: 'estimate' };
+
+    const k = key || getRunwayCacheKey(it);
+    if (!k) return { name: side, level: 'estimate' };
+
+    let hist = baySideHistoryCache.get(k);
+    if (!hist || !Array.isArray(hist.sides)) {
+      hist = { sides: [], ts: 0 };
+      baySideHistoryCache.set(k, hist);
+    }
+    hist.sides.push(side);
+    if (hist.sides.length > BAY_SIDE_HISTORY_MAX_POLLS) {
+      hist.sides.splice(0, hist.sides.length - BAY_SIDE_HISTORY_MAX_POLLS);
+    }
+    hist.ts = Date.now();
+
+    let lCount = 0, rCount = 0;
+    for (const s of hist.sides) { if (s === '19L') lCount++; else if (s === '19R') rCount++; }
+    // A tie (even-length window split evenly) falls back to this poll's own side rather than an
+    // arbitrary default -- still "this poll's answer", just not a majority yet either way.
+    const majoritySide = (lCount === rCount) ? side : (lCount > rCount ? '19L' : '19R');
+
+    return { name: majoritySide, level: 'estimate' };
   } catch (e) {
     return null;
   }
@@ -1332,7 +1416,7 @@ function predictRunwayGeometry(it) {
 }
 
 // Records this aircraft's earliest position for the bay-entry estimate above, then runs the
-// precise cross-track geometry. For a YBBN 19-family approach between roughly 2NM and 18NM,
+// precise cross-track geometry. For a YBBN 19-family approach between roughly 3NM and 18NM,
 // the bay-side evidence (earliest-entry, then current-position) is checked and preferred BEFORE
 // even a 'high'-confidence geometry result -- confirmed live and repeatedly (not a one-off):
 // the cross-track projection onto each runway's extended centerline can read comfortably
@@ -1340,9 +1424,14 @@ function predictRunwayGeometry(it) {
 // well before it has actually turned onto final -- a large margin between the two centerlines'
 // cross-track distances measures "clearly closer to this line right now", not "this is the
 // side it will land on". The simple real-world-validated east/west divider signal doesn't have
-// that failure mode. Both bay-side checks self-exclude at <=2NM (see their own dnm>2 guard), so
-// inside that range -- where the geometry has actually converged, matching the runwayLockCache
-// locking gate at <=3NM -- a 'high' geometry result takes over as before.
+// that failure mode.
+//
+// But by <=3NM -- the same range at which runwayLockCache actually locks a 'high' result in --
+// the geometry has genuinely converged, so a 'high' result there is checked and returned FIRST,
+// before either bay-side estimate gets a chance to run at all. This has to be an explicit check
+// ahead of both of them: the bay-side checks' own self-exclusion only kicks in at dnm<=2 (see
+// their own dnm>2 guard), which leaves a (2,3]NM sliver where they're still active and could
+// otherwise override an already-converged, cross-track-verified 'high' call.
 //
 // Below 'high' -- including a null result, or outside the bay-side checks' distance/family
 // window (e.g. 01-family approaches, or other airports where they always return null) -- we
@@ -1366,10 +1455,13 @@ function predictRunwayForAircraft(it) {
   const contradictsActiveFamily = (result) =>
     !!(result && activeFamily && extractRunwayFamily(result.name) !== activeFamily);
 
+  const dnm = it._dist_nm;
+  if (precise && precise.level === 'high' && typeof dnm === 'number' && dnm <= 3) return precise;
+
   const bayEstimate = estimateBayEntryEarly(it, key);
   if (bayEstimate && !contradictsActiveFamily(bayEstimate)) return bayEstimate;
 
-  const bayEstimateCurrent = estimateBaySideCurrent(it);
+  const bayEstimateCurrent = estimateBaySideCurrent(it, key);
   if (bayEstimateCurrent && !contradictsActiveFamily(bayEstimateCurrent)) return bayEstimateCurrent;
 
   if (precise && precise.level === 'high') return precise;
@@ -1407,6 +1499,7 @@ function findAirportByIcao(icao) {
 let APT = loadAirport() || DEFAULT_APT;
 loadRunwayLockCache();
 loadBayEntryCache();
+loadBaySideHistoryCache();
 
 function updateAirportHeader() {
   const $name = document.getElementById("aptName");
@@ -1763,18 +1856,20 @@ function renderAirportPicker(filterText){
 
 
 
-// runwayLockCache/bayEntryCache entries only ever mean anything relative to the airport they
-// were recorded under (a runway name like '19L' or a recorded bay-entry longitude is
-// meaningless -- or worse, silently misleading -- once compared against a different airport's
-// geometry). This matters more now than it used to: runwayLockCache also backs
+// runwayLockCache/bayEntryCache/baySideHistoryCache entries only ever mean anything relative to
+// the airport they were recorded under (a runway name like '19L' or a recorded bay-entry
+// longitude is meaningless -- or worse, silently misleading -- once compared against a different
+// airport's geometry). This matters more now than it used to: runwayLockCache also backs
 // getRecentConfirmedFamily()'s cross-aircraft "what's actually active" signal, so a stale
 // entry surviving an airport switch could wrongly suppress legitimate calls at the newly
 // selected airport for up to ACTIVE_FAMILY_FRESH_MS.
 function resetRunwayPredictionCaches() {
   runwayLockCache.clear();
   bayEntryCache.clear();
+  baySideHistoryCache.clear();
   try { localStorage.removeItem(RUNWAY_LOCK_STORE_KEY); } catch {}
   try { localStorage.removeItem(BAY_ENTRY_STORE_KEY); } catch {}
+  try { localStorage.removeItem(BAY_SIDE_HISTORY_STORE_KEY); } catch {}
 }
 
 function applySelectedAirport(apt) {
@@ -2343,8 +2438,10 @@ function airlineNameFromFlight(flight) {
 
     pruneRunwayLockCache(activeKeys);
     pruneBayEntryCache(activeKeys);
+    pruneBaySideHistoryCache(activeKeys);
     saveRunwayLockCache();
     saveBayEntryCache();
+    saveBaySideHistoryCache();
   }
 
   function showSpotModal(runwayName, flightLabel, level) {
