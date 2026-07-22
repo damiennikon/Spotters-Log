@@ -99,6 +99,7 @@ function loadModule() {
   const pieces = [
     extractConstObject(html, 'RUNWAYS'),
     extractConstObject(html, 'ARCHERFIELD'),
+    extractFunction(html, 'archerfieldDividerLon'),
     extractStatement(html, 'const EARLY_CALL_MAX_ALT_FT_PER_NM ='),
     extractBalancedConst(html, 'BAY_DIVIDER_LON'),
     extractStatement(html, 'const BAY_ENTRY_MIN_DIST_NM ='),
@@ -154,7 +155,9 @@ function loadPredictor() {
 // consensus mechanism). On its own, predictRunwayGeometry() correctly still returns the early
 // 01R call (see archerfield-01-early-call.test.js's "plausible altitude" case for the same
 // position/track/altitude shape).
-const lr552LowAltPoll = { reg: 'VH-VEK', lat: -27.65, lon: 153.05, track: 15, _dist_nm: 16.4, alt_baro: 4500 };
+// lon 153.08 sits east of archerfieldDividerLon() at this latitude (~153.061), on the real 01R
+// side of the corridor -- see the archerfieldDividerLon() comment in index.html.
+const lr552LowAltPoll = { reg: 'VH-VEK', lat: -27.65, lon: 153.08, track: 15, _dist_nm: 16.4, alt_baro: 4500 };
 
 test('bootstrap preserved: with no prior confirmed evidence, the wrapper still returns the early 01R call', () => {
   const mod = loadPredictor();

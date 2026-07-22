@@ -69,6 +69,7 @@ function loadPredictRunwayGeometry() {
   const pieces = [
     extractConstObject(html, 'RUNWAYS'),
     extractConstObject(html, 'ARCHERFIELD'),
+    extractFunction(html, 'archerfieldDividerLon'),
     extractStatement(html, 'const EARLY_CALL_MAX_ALT_FT_PER_NM ='),
     extractFunction(html, 'angleDiffDeg'),
     extractFunction(html, 'bearingDeg'),
@@ -120,7 +121,9 @@ test('VOZ943 repro: a STAR leg well off a 01 final heading, south-east of BNE ne
 test('a genuine 01 approach (south of the field, tracking close to 010) still gets the early call', () => {
   const mod = loadPredictor();
 
-  const it = { lat: -27.65, lon: 153.05, track: 15, _dist_nm: 16.4 };
+  // lon 153.08 sits east of archerfieldDividerLon() at this latitude (~153.061), on the real
+  // 01R side of the corridor -- see the archerfieldDividerLon() comment in index.html.
+  const it = { lat: -27.65, lon: 153.08, track: 15, _dist_nm: 16.4 };
   const result = mod.predictRunwayGeometry(it);
   assert.deepEqual(result, { name: '01R', level: 'likely+' });
 });
@@ -129,7 +132,7 @@ test('reasonable vectoring slop around 010 is still accepted (within the absolut
   const mod = loadPredictor();
 
   // 40 degrees off 010 -- inside the new +/-45 absolute tolerance.
-  const it = { lat: -27.65, lon: 153.05, track: 50, _dist_nm: 16.4 };
+  const it = { lat: -27.65, lon: 153.08, track: 50, _dist_nm: 16.4 };
   const result = mod.predictRunwayGeometry(it);
   assert.deepEqual(result, { name: '01R', level: 'likely+' });
 });
@@ -155,7 +158,7 @@ test('LR552 repro: a still-high, fast-descending-from-cruise aircraft south of t
   // 16.4NM (~660ft/NM) is not remotely close to an established approach profile; this is a
   // STAR-leg aircraft still transiting toward the field, whose track happens to point at BNE
   // simply because that's the direct routing from the south -- not evidence it's on a 01 final.
-  const it = { lat: -27.65, lon: 153.05, track: 15, _dist_nm: 16.4, alt_baro: 10850 };
+  const it = { lat: -27.65, lon: 153.08, track: 15, _dist_nm: 16.4, alt_baro: 10850 };
   const result = mod.predictRunwayGeometry(it);
   const isConfident01 = !!(result && result.name && result.name.startsWith('01'));
   assert.equal(
@@ -170,7 +173,7 @@ test('a genuine 01 approach at a plausible altitude for its distance still gets 
 
   // Same position/track as the LR552 repro above, but at an altitude consistent with an
   // aircraft actually established on approach at 16.4NM (below the ~450ft/NM ceiling).
-  const it = { lat: -27.65, lon: 153.05, track: 15, _dist_nm: 16.4, alt_baro: 4500 };
+  const it = { lat: -27.65, lon: 153.08, track: 15, _dist_nm: 16.4, alt_baro: 4500 };
   const result = mod.predictRunwayGeometry(it);
   assert.deepEqual(result, { name: '01R', level: 'likely+' });
 });

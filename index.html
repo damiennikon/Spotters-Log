@@ -565,9 +565,35 @@ const RUNWAYS = {
 };
 
 // Heuristic reference point used for earlier 01L/01R prediction at Brisbane (YBBN).
-// Archerfield Airport (YBAF) is a reliable east/west divider for southern arrivals.
+// Archerfield Airport (YBAF) is a reliable east/west divider for southern arrivals -- real
+// 01L-bound traffic passes west of the field, real 01R-bound traffic passes east.
 // (Used only as a geographic reference — this does not fetch any external data.)
 const ARCHERFIELD = { lat: -27.5706, lon: 153.0075 };
+
+// East/west divider longitude for the Archerfield 01L/01R early-call rule below, evaluated at
+// the aircraft's OWN latitude rather than a single fixed point. RWY 01L/01R share the same
+// heading (~010°, ~10° east of true north), so their extended centerlines drift measurably WEST
+// the further south of the runway thresholds you go (~1.7NM west per 10NM of southward
+// extension) -- a single fixed longitude, whether Archerfield's own coordinate above or the raw
+// threshold-pair midpoint, is only accurate near the thresholds themselves and becomes
+// increasingly wrong at Archerfield's latitude and beyond, which is exactly the range this
+// early-call rule is meant to cover (it's used out to 30NM -- see the dnm <= 30 gate below).
+// This projects each runway's own extended centerline out to the aircraft's current latitude
+// and returns the midpoint longitude between them there, so the divider tracks the real corridor
+// at any distance instead of a single point that's only valid close to the airport.
+function archerfieldDividerLon(lat0) {
+  const rwys = (RUNWAYS && RUNWAYS.YBBN) || [];
+  const l = rwys.find(r => r.name === '01L');
+  const r = rwys.find(r => r.name === '01R');
+  if (!l || !r || typeof lat0 !== 'number' || !Number.isFinite(lat0)) return ARCHERFIELD.lon;
+  const rad = Math.PI / 180;
+  const cosLat = Math.cos(lat0 * rad);
+  const projectedLon = (rwy) => {
+    const tanHeading = Math.tan((rwy.heading || 10) * rad);
+    return rwy.thrLon + (lat0 - rwy.thrLat) * tanHeading / cosLat;
+  };
+  return (projectedLon(l) + projectedLon(r)) / 2;
+}
 
 // Sanity ceiling for predictRunwayGeometry()'s early-call heuristics (the Archerfield 01L/01R
 // rule, and the general closeInFallback below): an aircraft still well above a plausible
@@ -1232,8 +1258,9 @@ function predictRunwayGeometry(it) {
         angleDiffDeg(track, 10) <= 45 &&
         altPlausibleForEarlyCall
       ) {
-        // East of Archerfield => 01R, West => 01L
-        const side = (lon0 > ARCHERFIELD.lon) ? '01R' : '01L';
+        // East of the Archerfield-corridor divider (projected to this aircraft's own latitude,
+        // see archerfieldDividerLon above) => 01R, West => 01L
+        const side = (lon0 > archerfieldDividerLon(lat0)) ? '01R' : '01L';
         return { name: side, level: 'likely+' };
       }
       // No unconditional return here — fall through to the general cross-track logic below,

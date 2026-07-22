@@ -101,6 +101,7 @@ function loadModule() {
     extractStatement(html, 'const BAY_ENTRY_MIN_LON_OFFSET_NM ='),
     extractStatement(html, 'const BAY_SIDE_HISTORY_MAX_POLLS ='),
     extractConstObject(html, 'ARCHERFIELD'),
+    extractFunction(html, 'archerfieldDividerLon'),
     extractStatement(html, 'const EARLY_CALL_MAX_ALT_FT_PER_NM ='),
     extractStatement(html, 'const ACTIVE_FAMILY_FRESH_MS ='),
     extractFunction(html, 'angleDiffDeg'),
