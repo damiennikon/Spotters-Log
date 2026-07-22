@@ -1033,6 +1033,49 @@ function estimateBayEntryEarly(it, key) {
   }
 }
 
+// Same divider/confidence logic as estimateBayEntryEarly, but reads the aircraft's CURRENT
+// position instead of a cached earliest-entry one -- so it doesn't depend on ever having
+// captured a valid entry (which requires a poll at >= BAY_ENTRY_MIN_DIST_NM, and is often
+// simply never available). Real-world observation: predictRunwayGeometry's cross-track
+// projection onto each runway's extended centerline can confidently favor 19L even from a
+// position that's visibly, unambiguously on the Redcliffe/west side of the bay, while the
+// aircraft is still on a track angled across the bay rather than already lined up on final --
+// "closest centerline" and "which side of the bay" are not the same computation until the
+// aircraft has actually converged. This current-position check is the same reliable signal as
+// the entry-based one, just evaluated every poll instead of only once, early.
+function estimateBaySideCurrent(it) {
+  try {
+    const icao = (APT && APT.icao) ? String(APT.icao).toUpperCase() : '';
+    if (icao !== 'YBBN' || !APT || typeof APT.lat !== 'number' || typeof APT.lon !== 'number') return null;
+
+    const dnm = it._dist_nm;
+    if (!(typeof dnm === 'number' && dnm > 2 && dnm <= 18)) return null; // same window as estimateBayEntryEarly
+
+    const lat0 = (typeof it.lat === 'number') ? it.lat : null;
+    const lon0 = (typeof it.lon === 'number') ? it.lon : null;
+    if (lat0 == null || lon0 == null || !Number.isFinite(lat0) || !Number.isFinite(lon0)) return null;
+
+    let track = (typeof it.track === 'number') ? it.track : ((typeof it.trk === 'number') ? it.trk : null);
+    if (track == null || !Number.isFinite(track)) track = bearingDeg(lat0, lon0, APT.lat, APT.lon);
+    if (track == null || !Number.isFinite(track)) return null;
+
+    const brgToApt = bearingDeg(lat0, lon0, APT.lat, APT.lon);
+    const towardCos = Math.cos(angleDiffDeg(track, brgToApt) * Math.PI / 180);
+    if (towardCos < 0.15) return null;
+    if (angleDiffDeg(track, 190) >= angleDiffDeg(track, 10)) return null;
+
+    // Same confidence buffer as the entry check -- must be a meaningful distance from the
+    // divider, not just marginally on one side (ordinary position noise near the line).
+    const lonOffsetNm = Math.abs(lon0 - BAY_DIVIDER_LON) * Math.cos(APT.lat * Math.PI / 180) * 60;
+    if (!(lonOffsetNm >= BAY_ENTRY_MIN_LON_OFFSET_NM)) return null;
+
+    const side = (lon0 > BAY_DIVIDER_LON) ? '19L' : '19R';
+    return { name: side, level: 'estimate' };
+  } catch (e) {
+    return null;
+  }
+}
+
 function predictRunwayGeometry(it) {
   try {
     const icao = (APT && APT.icao) ? String(APT.icao).toUpperCase() : '';
@@ -1316,6 +1359,9 @@ function predictRunwayForAircraft(it) {
 
   const bayEstimate = estimateBayEntryEarly(it, key);
   if (bayEstimate && !contradictsActiveFamily(bayEstimate)) return bayEstimate;
+
+  const bayEstimateCurrent = estimateBaySideCurrent(it);
+  if (bayEstimateCurrent && !contradictsActiveFamily(bayEstimateCurrent)) return bayEstimateCurrent;
 
   if (precise && !contradictsActiveFamily(precise)) return precise;
 
