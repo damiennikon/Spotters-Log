@@ -9,6 +9,15 @@
 // side, anywhere in that (2,3]NM sliver. Fixed by checking a genuinely 'high' geometry result
 // FIRST, before either bay-side estimate runs, whenever dnm<=3.
 //
+// This is deliberately scoped to <=3NM, not unconditional: predictRunwayForAircraft() used to
+// trust ANY 'high' geometry result unconditionally, and that was live-tested and reverted (see
+// commit b8736b4) specifically because it flipped QLK365D wrong at 6.9NM -- correct 19R at
+// 7.5NM via the bay-side check, wrong 19L once geometry's own 'high' tier kicked in and
+// short-circuited past it. A 'high' result losing to a contradicting bay-side estimate outside
+// <=3NM is that fix still working, not a gap in this one -- see the "Fix 1 regression" test
+// below, which proves it holds even for a genuinely 'high' result at 5NM against a deliberately
+// poisoned bay-side-current history.
+//
 // Fix 2 (snapshot vs. trend): estimateBaySideCurrent() decided purely from the aircraft's
 // CURRENT longitude vs. BAY_DIVIDER_LON. Real Brisbane 19-family traffic gets vectored
 // laterally during the approach -- entering from one side of the bay, drifting across while
@@ -199,14 +208,48 @@ test('Fix 1: a converged high-confidence geometry result wins over a contradicti
     'the converged, cross-track-verified geometry call must win, not the contradicting bay-side snapshot');
 });
 
-test('Fix 1 regression: outside the convergence range (>3NM), a non-contradicting bay-side estimate is still preferred over geometry (unchanged behavior)', () => {
+// Fix 1's <=3NM scope is deliberate, not an oversight: predictRunwayForAircraft() used to run
+// `if (precise && precise.level === 'high') return precise;` unconditionally, before any
+// bay-side check at all (see commit b8736b4, "Prefer bay-side evidence over geometry 'high' for
+// 19L/19R mid-range"). That was live-tested and reverted specifically because it flipped
+// QLK365D wrong at 6.9NM: correct 19R at 7.5NM via the bay-side check, then wrong 19L once
+// geometry's own 'high' tier kicked in and short-circuited past the bay-side check entirely.
+// So a genuinely 'high' geometry result losing to a contradicting bay-side estimate anywhere
+// outside <=3NM is not a bug -- it's the fix for that exact flip, still doing its job. This
+// test proves it's still doing its job even in the strongest form of that conflict: a real
+// 'high' geometry result at 5NM, contradicted by a bay-side-CURRENT majority vote (not just the
+// simpler bay-entry estimate) that's been deliberately built up ("poisoned") on the wrong side
+// beforehand -- exactly the shape of case that motivated b8736b4 in the first place.
+test('Fix 1 regression: outside <=3NM, a poisoned bay-side-current majority vote still wins over a genuinely high geometry result (b8736b4 behavior preserved)', () => {
   const mod = loadPredictor();
-  // Same shape, but at 6.9NM -- outside the <=3NM convergence gate. Geometry only reaches
-  // 'likely' here (see qlk379d-bay-entry-lon-offset.test.js), so this isn't testing Fix 1's
-  // override at all -- it's confirming Fix 1 didn't change anything outside its own range.
-  const farPoll = { reg: 'QLK-FIX1-FAR', lat: -27.2708, lon: 153.1390, track: 212, _dist_nm: 6.9 };
-  const result = mod.predictRunwayForAircraft(farPoll);
-  assert.notEqual(result && result.level, 'high', 'sanity: geometry must not be high this far out for this position');
+  const key = 'QLK-POISON';
+
+  // First-ever poll for this aircraft is already inside 12NM (BAY_ENTRY_MIN_DIST_NM), so
+  // estimateBayEntryEarly never gets a qualifying entry point -- this isolates the test to
+  // estimateBaySideCurrent's majority-vote history specifically (Fix 2's mechanism), rather than
+  // letting the separate bay-entry estimate reach the same conclusion for an unrelated reason.
+  const poisonPolls = [
+    { reg: key, lat: -27.22, lon: 153.148, track: 212, _dist_nm: 11.5 },
+    { reg: key, lat: -27.24, lon: 153.146, track: 208, _dist_nm: 9.5 },
+    { reg: key, lat: -27.26, lon: 153.147, track: 209, _dist_nm: 7.5 },
+  ];
+  for (const p of poisonPolls) {
+    const r = mod.predictRunwayForAircraft(p);
+    assert.equal(r && r.name, '19L', `sanity: poisoning poll at ${p._dist_nm}NM should read 19L`);
+  }
+  const hist = mod.baySideHistoryCache.get(key);
+  assert.deepEqual(hist && hist.sides, ['19L', '19L', '19L'], 'sanity: three 19L votes recorded before the high-confidence poll');
+
+  // Same lr552-shaped position used in the Fix 1 <=3NM test above (genuinely on the 19R
+  // extended centerline), but at 5NM -- comfortably outside the <=3NM convergence gate.
+  const poll5nm = { reg: key, lat: -27.2708, lon: 153.1390, track: 190, _dist_nm: 5.0 };
+  const geometry = mod.predictRunwayGeometry(poll5nm);
+  assert.deepEqual(geometry, { name: '19R', level: 'high' },
+    'sanity: geometry really is high confidence 19R at 5NM for this position');
+
+  const result = mod.predictRunwayForAircraft(poll5nm);
+  assert.deepEqual(result, { name: '19L', level: 'estimate' },
+    'the poisoned bay-side majority vote must still win over a contradicting high geometry result outside <=3NM');
 });
 
 // ===== Fix 2: snapshot vs. trend (QLK453D-shaped west-entry / east-drift / settle reconstruction) =====
