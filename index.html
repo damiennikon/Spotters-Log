@@ -2414,16 +2414,16 @@ function airlineNameFromFlight(flight) {
         .filter(p => typeof p._dist_nm === 'number')
         .filter(p => p._dist_nm <= LIMITS.maxNM)
         .filter(isInboundCandidate)
-        // Primary: ETA (ascending). Unknown ETA goes to the bottom.
-        // Tie-break: closer distance.
+        // Primary: distance to airport (ascending) — matches physical approach order.
+        // Tie-break: ETA (ascending), unknown ETA goes to the bottom.
         .sort((a, b) => {
+          if (a._dist_nm !== b._dist_nm) return a._dist_nm - b._dist_nm;
           const ea = (typeof a._eta_min === 'number') ? a._eta_min : null;
           const eb = (typeof b._eta_min === 'number') ? b._eta_min : null;
-          if (ea == null && eb == null) return (a._dist_nm || 1e9) - (b._dist_nm || 1e9);
+          if (ea == null && eb == null) return 0;
           if (ea == null) return 1;
           if (eb == null) return -1;
-          if (ea !== eb) return ea - eb;
-          return (a._dist_nm || 1e9) - (b._dist_nm || 1e9);
+          return ea - eb;
         })
         .slice(0, LIMITS.maxResults);
 
