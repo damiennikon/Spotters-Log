@@ -118,6 +118,11 @@ function loadModule() {
     extractFunction(html, 'getRunwayCacheKey'),
     extractFunction(html, 'extractRunwayFamily'),
     extractFunction(html, 'getRecentConfirmedFamily'),
+    extractStatement(html, 'const GEOMETRY_AGREEMENT_STORE_KEY ='),
+    extractStatement(html, 'const GEOMETRY_AGREEMENT_MIN_STREAK ='),
+    extractStatement(html, 'const GEOMETRY_AGREEMENT_MIN_SPAN_NM ='),
+    extractFunction(html, 'recordGeometryAgreement'),
+    extractFunction(html, 'getSustainedGeometrySide'),
     extractFunction(html, 'predictRunwayForAircraft'),
     extractFunction(html, 'resetRunwayPredictionCaches'),
   ].join('\n\n');
@@ -127,6 +132,7 @@ function loadModule() {
     const bayEntryCache = new Map();
     const runwayLockCache = new Map();
     const baySideHistoryCache = new Map();
+    const geometryAgreementCache = new Map();
     ${pieces}
     return {
       predictRunwayGeometry,
@@ -136,6 +142,9 @@ function loadModule() {
       bayEntryCache,
       runwayLockCache,
       baySideHistoryCache,
+      geometryAgreementCache,
+      recordGeometryAgreement,
+      getSustainedGeometrySide,
       setAPT: (apt) => { APT = apt; },
     };
   })`;
@@ -217,19 +226,22 @@ test('a high-confidence geometry result is never suppressed, even when it contra
   assert.deepEqual(result, { name: '19R', level: 'high' });
 });
 
-test('resetRunwayPredictionCaches() empties runwayLockCache, bayEntryCache, and baySideHistoryCache', () => {
+test('resetRunwayPredictionCaches() empties runwayLockCache, bayEntryCache, baySideHistoryCache, and geometryAgreementCache', () => {
   const mod = loadPredictor();
   mod.runwayLockCache.set('SOME-FLIGHT', { name: '19L', ts: Date.now() });
   mod.bayEntryCache.set('SOME-FLIGHT', { lat: -27.2, lon: 153.1, dnm: 14, ts: Date.now() });
   mod.baySideHistoryCache.set('SOME-FLIGHT', { sides: ['19R'], ts: Date.now() });
+  mod.geometryAgreementCache.set('SOME-FLIGHT', { name: '19R', count: 3, firstDnm: 9, lastDnm: 8, ts: Date.now() });
 
   assert.equal(mod.runwayLockCache.size, 1);
   assert.equal(mod.bayEntryCache.size, 1);
   assert.equal(mod.baySideHistoryCache.size, 1);
+  assert.equal(mod.geometryAgreementCache.size, 1);
 
   mod.resetRunwayPredictionCaches();
 
   assert.equal(mod.runwayLockCache.size, 0);
   assert.equal(mod.bayEntryCache.size, 0);
   assert.equal(mod.baySideHistoryCache.size, 0);
+  assert.equal(mod.geometryAgreementCache.size, 0);
 });

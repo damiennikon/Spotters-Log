@@ -116,6 +116,10 @@ function loadModule() {
     extractFunction(html, 'getRunwayCacheKey'),
     extractFunction(html, 'extractRunwayFamily'),
     extractFunction(html, 'getRecentConfirmedFamily'),
+    extractStatement(html, 'const GEOMETRY_AGREEMENT_MIN_STREAK ='),
+    extractStatement(html, 'const GEOMETRY_AGREEMENT_MIN_SPAN_NM ='),
+    extractFunction(html, 'recordGeometryAgreement'),
+    extractFunction(html, 'getSustainedGeometrySide'),
     extractFunction(html, 'predictRunwayForAircraft'),
   ].join('\n\n');
 
@@ -124,6 +128,7 @@ function loadModule() {
     const bayEntryCache = new Map();
     const runwayLockCache = new Map();
     const baySideHistoryCache = new Map();
+    const geometryAgreementCache = new Map();
     ${pieces}
     return {
       predictRunwayGeometry,
@@ -133,6 +138,9 @@ function loadModule() {
       bayEntryCache,
       runwayLockCache,
       baySideHistoryCache,
+      geometryAgreementCache,
+      recordGeometryAgreement,
+      getSustainedGeometrySide,
       setAPT: (apt) => { APT = apt; },
     };
   })`;
