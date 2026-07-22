@@ -739,6 +739,7 @@ function shouldExcludeAmberleyTraffic(p, dToAptNm) {
 // Runway lock cache: once a runway becomes high-confidence, keep it fixed for that aircraft
 // so the UI does not flip from 'locked' (purple) to 'guess' (orange) near the threshold.
 const runwayLockCache = new Map();
+const RUNWAY_LOCK_STORE_KEY = "photolog_runway_lock_v1";
 
 // How far out a parallel-runway (L/R) guess is allowed to name a specific side in the muted
 // RWY chip, instead of the generic "Runway confirmation incoming" hedge (see runwayChipHtml
@@ -762,6 +763,37 @@ function pruneRunwayLockCache(activeKeys) {
       runwayLockCache.delete(k);
     }
   }
+}
+
+// Persist runwayLockCache across reloads so a reload can't drop real evidence gathered for an
+// in-progress approach (see runwayChipHtml's reload comment below). Entries only mean anything
+// for the airport they were recorded under, so the payload is tagged with the current ICAO and
+// discarded on load if it doesn't match (same reasoning as resetRunwayPredictionCaches).
+function saveRunwayLockCache() {
+  try {
+    const icao = (APT && APT.icao) ? String(APT.icao).toUpperCase() : '';
+    if (!icao) return;
+    localStorage.setItem(RUNWAY_LOCK_STORE_KEY,
+      JSON.stringify({ icao, entries: Array.from(runwayLockCache.entries()) }));
+  } catch {}
+}
+
+function loadRunwayLockCache() {
+  try {
+    const icao = (APT && APT.icao) ? String(APT.icao).toUpperCase() : '';
+    if (!icao) return;
+    const raw = localStorage.getItem(RUNWAY_LOCK_STORE_KEY);
+    if (!raw) return;
+    const o = JSON.parse(raw);
+    if (!o || typeof o !== 'object' || o.icao !== icao || !Array.isArray(o.entries)) return;
+    for (const [k, v] of o.entries) {
+      if (k && v && typeof v.ts === 'number' && typeof v.name === 'string' && v.name) {
+        runwayLockCache.set(k, v);
+      }
+    }
+    // Drop anything already stale so an old payload can't revive a wrong "locked" answer.
+    pruneRunwayLockCache(new Set());
+  } catch {}
 }
 
 // How stale a runwayLockCache entry can be and still count as evidence of "what's actually
@@ -851,6 +883,7 @@ function estimateNorthFamilyEarly(it) {
 // tracked aircraft at, keyed the same way as runwayLockCache. Unlike that cache, a bay-entry
 // estimate is never treated as a confident/locked answer -- see estimateBayEntryEarly() below.
 const bayEntryCache = new Map();
+const BAY_ENTRY_STORE_KEY = "photolog_bay_entry_v1";
 
 // East/west divider for the bay-entry heuristic below. This is deliberately NOT APT.lon (BNE's
 // own reference point): both runway thresholds sit east of APT.lon (see RUNWAYS.YBBN above), so
@@ -895,6 +928,38 @@ function pruneBayEntryCache(activeKeys) {
       bayEntryCache.delete(k);
     }
   }
+}
+
+// Persist bayEntryCache across reloads -- this is the harder-to-recover cache, since an entry
+// can only ever be (re)captured while the aircraft is still >= BAY_ENTRY_MIN_DIST_NM out. If a
+// reload drops it after the aircraft has already closed inside that range, the "which side did
+// it enter from" signal is gone for good for that approach. See saveRunwayLockCache above for
+// the same per-ICAO scoping rationale.
+function saveBayEntryCache() {
+  try {
+    const icao = (APT && APT.icao) ? String(APT.icao).toUpperCase() : '';
+    if (!icao) return;
+    localStorage.setItem(BAY_ENTRY_STORE_KEY,
+      JSON.stringify({ icao, entries: Array.from(bayEntryCache.entries()) }));
+  } catch {}
+}
+
+function loadBayEntryCache() {
+  try {
+    const icao = (APT && APT.icao) ? String(APT.icao).toUpperCase() : '';
+    if (!icao) return;
+    const raw = localStorage.getItem(BAY_ENTRY_STORE_KEY);
+    if (!raw) return;
+    const o = JSON.parse(raw);
+    if (!o || typeof o !== 'object' || o.icao !== icao || !Array.isArray(o.entries)) return;
+    for (const [k, v] of o.entries) {
+      if (k && v && typeof v.ts === 'number' &&
+          typeof v.lat === 'number' && typeof v.lon === 'number') {
+        bayEntryCache.set(k, v);
+      }
+    }
+    pruneBayEntryCache(new Set());
+  } catch {}
 }
 
 // Records the first position seen for this aircraft (by cache key) and never overwrites it while
@@ -1196,21 +1261,27 @@ function predictRunwayGeometry(it) {
           // turn, ordinary ADS-B jitter) can land marginally closer to the wrong
           // centerline. Only keep 'high' confidence (which is what gets cached and
           // locked in for the rest of the approach) when the runner-up is clearly
-          // further away, not just numerically further by a hair.
+          // further away, not just numerically further by a hair. A thin margin at ANY
+          // level -- not just 'high' -- means the two centerlines genuinely weren't
+          // distinguishable yet, so it gets the 'guess' tier: runwayChipHtml hedges a
+          // 'guess' regardless of distance, instead of confidently naming a side that's
+          // little better than a coin flip (this is what was producing the east-biased
+          // 19L calls for aircraft still over Moreton Bay, not yet converged).
           const MIN_LR_MARGIN_NM = 0.25;
           const otherCross = evals.reduce((m, e) => (e.c === best ? m : Math.min(m, e.crossNm)), Infinity);
           const margin = otherCross - bestCross;
-          const lrLevel = (level === 'high' && margin < MIN_LR_MARGIN_NM) ? 'likely' : level;
+          const lrLevel = (margin < MIN_LR_MARGIN_NM) ? 'guess' : level;
           return { name: best.name, level: lrLevel };
         }
       }
 
       // Fallback heuristic: pick based on which side of the airport the aircraft is on relative to runway direction.
       // This is a coarse "which half of the airport" guess (no centerline comparison at all), so it should
-      // never be trusted enough to lock into the cache as high confidence.
+      // never be trusted enough to lock into the cache as high confidence -- and, like a thin-margin
+      // cross-track pick above, always gets the 'guess' tier so it's hedged rather than named outright.
       const want = side > 0 ? 'L' : 'R';
       const picked = candidates.find(c => new RegExp(want + '$', 'i').test(c.name));
-      if (picked) return { name: picked.name, level: (level === 'high' ? 'likely' : level) };
+      if (picked) return { name: picked.name, level: 'guess' };
     }
 
     return { name: candidates[0].name, level };
@@ -1277,6 +1348,8 @@ function findAirportByIcao(icao) {
 }
 
 let APT = loadAirport() || DEFAULT_APT;
+loadRunwayLockCache();
+loadBayEntryCache();
 
 function updateAirportHeader() {
   const $name = document.getElementById("aptName");
@@ -1643,6 +1716,8 @@ function renderAirportPicker(filterText){
 function resetRunwayPredictionCaches() {
   runwayLockCache.clear();
   bayEntryCache.clear();
+  try { localStorage.removeItem(RUNWAY_LOCK_STORE_KEY); } catch {}
+  try { localStorage.removeItem(BAY_ENTRY_STORE_KEY); } catch {}
 }
 
 function applySelectedAirport(apt) {
@@ -2039,6 +2114,10 @@ function airlineNameFromFlight(flight) {
   // in-memory state (runwayLockCache, bayEntryCache, getRecentConfirmedFamily) resets on every
   // page load, so a guess that looked solid before a reload can flip sides after one with no
   // visual difference -- so hedge with a generic "confirming" message that far out instead.
+  // A rawRwyLevel of 'guess' (a thin cross-track margin, or the coarse no-centerline-data
+  // fallback -- see predictRunwayGeometry) gets the same hedge regardless of distance: that
+  // level means the L/R pick genuinely isn't backed by real evidence yet, so naming it even
+  // close-in would just be confidently wrong instead of confidently right.
   function runwayChipHtml(rwy, rwyLevel, rawRwy, rawRwyLevel, icon, dnm) {
     if (rwy) {
       const cls = rwyLevel === 'high' ? 'tag-runway-high' : 'tag-runway-likely';
@@ -2046,7 +2125,8 @@ function airlineNameFromFlight(flight) {
     }
     if (rawRwy) {
       const closeEnoughToGuess = (typeof dnm === 'number' && Number.isFinite(dnm) && dnm <= RUNWAY_GUESS_NM);
-      if (/[LR]$/i.test(rawRwy) && !closeEnoughToGuess) {
+      const lowConfidenceSide = rawRwyLevel === 'guess';
+      if (/[LR]$/i.test(rawRwy) && (!closeEnoughToGuess || lowConfidenceSide)) {
         return `<div class="tag tag-runway tag-runway-estimate">${icon}Runway confirmation incoming</div>`;
       }
       return `<div class="tag tag-runway tag-runway-estimate">${icon}RWY ${rawRwy}</div>`;
@@ -2206,6 +2286,8 @@ function airlineNameFromFlight(flight) {
 
     pruneRunwayLockCache(activeKeys);
     pruneBayEntryCache(activeKeys);
+    saveRunwayLockCache();
+    saveBayEntryCache();
   }
 
   function showSpotModal(runwayName, flightLabel, level) {
