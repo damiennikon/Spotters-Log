@@ -97,6 +97,9 @@ function loadBayEntryModule() {
   const pieces = [
     extractConstObject(html, 'RUNWAYS'),
     extractBalancedConst(html, 'BAY_DIVIDER_LON'),
+    extractStatement(html, 'const BAY_DIVIDER_SLOPE_NM_PER_NM ='),
+    extractStatement(html, 'const BAY_DIVIDER_INTERCEPT_NM ='),
+    extractFunction(html, 'bayDividerLon'),
     extractStatement(html, 'const BAY_ENTRY_MIN_DIST_NM ='),
     extractStatement(html, 'const BAY_ENTRY_MIN_LON_OFFSET_NM ='),
     extractFunction(html, 'angleDiffDeg'),

@@ -129,6 +129,9 @@ function loadModule() {
   const pieces = [
     extractConstObject(html, 'RUNWAYS'),
     extractBalancedConst(html, 'BAY_DIVIDER_LON'),
+    extractStatement(html, 'const BAY_DIVIDER_SLOPE_NM_PER_NM ='),
+    extractStatement(html, 'const BAY_DIVIDER_INTERCEPT_NM ='),
+    extractFunction(html, 'bayDividerLon'),
     extractStatement(html, 'const BAY_ENTRY_MIN_DIST_NM ='),
     extractStatement(html, 'const BAY_ENTRY_MIN_LON_OFFSET_NM ='),
     extractStatement(html, 'const BAY_SIDE_HISTORY_MAX_POLLS ='),
@@ -190,23 +193,36 @@ function loadPredictor() {
 // east-of-BAY_DIVIDER_LON territory (~0.58NM), so the two signals genuinely disagree here.
 const convergedHighPoll = { reg: 'QLK-FIX1', lat: -27.2708, lon: 153.1390, track: 190, _dist_nm: 2.5 };
 
-test('Fix 1 setup: at 2.5NM the geometry and bay-side-current signals genuinely disagree', () => {
+// Real 19L-corridor-grounded poll (see the "Fix 1 regression" poisonPolls below for how these
+// coordinates are derived from the FR24-traced 19L track) used here just to build up a
+// confidently-19L majority-vote history for this key -- the point isn't to make THIS single
+// snapshot disagree with geometry (with the corrected, distance-scaled divider, a position that
+// genuinely sits on predictRunwayGeometry's 19R centerline essentially never also reads 19L via
+// estimateBaySideCurrent anymore -- that's the fix working as intended, not a gap in this test).
+// The point is to prove the <=3NM short-circuit ignores accumulated bay-side history entirely,
+// not just a single disagreeing snapshot.
+const fix1PoisonPoll = { reg: 'QLK-FIX1', lat: -27.217584, lon: 153.241081, track: 205, _dist_nm: 11.5 };
+
+test('Fix 1 setup: a poisoned bay-side history can be built up for this key ahead of the <=3NM check', () => {
   const mod = loadPredictor();
 
   const geometry = mod.predictRunwayGeometry(convergedHighPoll);
   assert.deepEqual(geometry, { name: '19R', level: 'high' },
-    'sanity: geometry must actually reach high confidence here for this to be a real ordering conflict');
+    'sanity: geometry must actually reach high confidence here for the <=3NM short-circuit to be meaningfully exercised');
 
-  const baySide = mod.estimateBaySideCurrent(convergedHighPoll, 'QLK-FIX1');
-  assert.equal(baySide && baySide.name, '19L',
-    'sanity: the bay-side-current snapshot reads the opposite (wrong) side at this exact position');
+  const poisoned = mod.predictRunwayForAircraft(fix1PoisonPoll);
+  assert.equal(poisoned && poisoned.name, '19L', 'sanity: the poisoning poll reads 19L for this key');
 });
 
-test('Fix 1: a converged high-confidence geometry result wins over a contradicting bay-side estimate at <=3NM', () => {
+test('Fix 1: a converged high-confidence geometry result wins over a poisoned bay-side history at <=3NM', () => {
   const mod = loadPredictor();
+
+  // Poison the history first, same as the setup test.
+  mod.predictRunwayForAircraft(fix1PoisonPoll);
+
   const result = mod.predictRunwayForAircraft(convergedHighPoll);
   assert.deepEqual(result, { name: '19R', level: 'high' },
-    'the converged, cross-track-verified geometry call must win, not the contradicting bay-side snapshot');
+    'the converged, cross-track-verified geometry call must win at <=3NM, even with a poisoned bay-side history behind it');
 });
 
 // Fix 1's <=3NM scope is deliberate, not an oversight: predictRunwayForAircraft() used to run
@@ -229,10 +245,17 @@ test('Fix 1 regression: outside <=3NM, a poisoned bay-side-current majority vote
   // estimateBayEntryEarly never gets a qualifying entry point -- this isolates the test to
   // estimateBaySideCurrent's majority-vote history specifically (Fix 2's mechanism), rather than
   // letting the separate bay-entry estimate reach the same conclusion for an unrelated reason.
+  //
+  // Coordinates: interpolated along the real 19L (east/Moreton Island) corridor traced from FR24
+  // (see index.html's BAY_DIVIDER_SLOPE_NM_PER_NM comment for the source data), then nudged
+  // ~0.9NM further east so each point clears BAY_ENTRY_MIN_LON_OFFSET_NM with a comfortable
+  // margin against the distance-scaled divider -- the real 19L line itself sits close enough to
+  // the divider at these distances (half-corridor-width ~0.5NM) that using it unmodified would be
+  // right at the ambiguity boundary, not clearly poisoned.
   const poisonPolls = [
-    { reg: key, lat: -27.22, lon: 153.148, track: 212, _dist_nm: 11.5 },
-    { reg: key, lat: -27.24, lon: 153.146, track: 208, _dist_nm: 9.5 },
-    { reg: key, lat: -27.26, lon: 153.147, track: 209, _dist_nm: 7.5 },
+    { reg: key, lat: -27.217584, lon: 153.241081, track: 205, _dist_nm: 11.5 },
+    { reg: key, lat: -27.247360, lon: 153.224082, track: 205, _dist_nm: 9.5 },
+    { reg: key, lat: -27.277148, lon: 153.207046, track: 205, _dist_nm: 7.5 },
   ];
   for (const p of poisonPolls) {
     const r = mod.predictRunwayForAircraft(p);
@@ -255,19 +278,27 @@ test('Fix 1 regression: outside <=3NM, a poisoned bay-side-current majority vote
 
 // ===== Fix 2: snapshot vs. trend (QLK453D-shaped west-entry / east-drift / settle reconstruction) =====
 
-// Reconstructed poll stream for a 19R arrival that enters west of BAY_DIVIDER_LON, drifts east
-// across it while intercepting final (a normal lateral vector, not a side change), then settles
-// back west onto the 19R centerline -- the real-world pattern reported for QLK453D (and QFA707 /
+// Reconstructed poll stream for a 19R arrival that enters west of the divider, drifts east across
+// it while intercepting final (a normal lateral vector, not a side change), then settles back
+// west onto the 19R centerline -- the real-world pattern reported for QLK453D (and QFA707 /
 // QLK365D). The first-ever poll is already inside 12NM (BAY_ENTRY_MIN_DIST_NM), so
 // estimateBayEntryEarly never has a qualifying entry point and stays out of the way: every poll
 // below actually exercises estimateBaySideCurrent's majority-vote history, not the separate
 // bay-entry heuristic.
+//
+// The two MID-VECTOR longitudes are chosen to genuinely cross to the 19L side of the
+// distance-scaled divider (bayDividerLon) at their respective distances, with a ~0.8NM margin
+// past BAY_ENTRY_MIN_LON_OFFSET_NM -- against the old fixed BAY_DIVIDER_LON these points (at
+// 153.139ish) used to be the transient crossing; against the corrected divider that longitude no
+// longer crosses at all this far out (see index.html's BAY_DIVIDER_SLOPE_NM_PER_NM comment), so a
+// genuine transient-east excursion now needs a materially larger eastward deviation to represent
+// the same real-world pattern.
 const qlk453dPolls = [
   { reg: 'QLK453D', lat: -27.230, lon: 153.111274, track: 200, _dist_nm: 10.5 }, // west, established
   { reg: 'QLK453D', lat: -27.255, lon: 153.112212, track: 202, _dist_nm: 9.2 },  // west
   { reg: 'QLK453D', lat: -27.280, lon: 153.115028, track: 206, _dist_nm: 8.0 },  // west, starting to turn
-  { reg: 'QLK453D', lat: -27.300, lon: 153.139429, track: 218, _dist_nm: 6.6 },  // MID-VECTOR: transient east crossing
-  { reg: 'QLK453D', lat: -27.320, lon: 153.139053, track: 208, _dist_nm: 5.2 },  // still transient east
+  { reg: 'QLK453D', lat: -27.300, lon: 153.188364, track: 218, _dist_nm: 6.6 },  // MID-VECTOR: transient east crossing
+  { reg: 'QLK453D', lat: -27.320, lon: 153.176403, track: 208, _dist_nm: 5.2 },  // still transient east
   { reg: 'QLK453D', lat: -27.340, lon: 153.115966, track: 194, _dist_nm: 3.6 },  // settling back west
   { reg: 'QLK453D', lat: -27.355, lon: 153.114089, track: 190, _dist_nm: 2.5 },  // converged on 19R
 ];
@@ -324,9 +355,13 @@ test('Fix 2 regression: a genuine, sustained side change still updates within th
   }
   // ...then a real, sustained run of 19L polls (not a single transient blip) should eventually
   // become the majority within BAY_SIDE_HISTORY_MAX_POLLS polls, not be stuck on the old side.
+  // Longitudes are chosen per-distance (not a single fixed value) to clear the distance-scaled
+  // divider's 19L side at each dnm -- a fixed longitude that reads 19L at 7NM out no longer
+  // reliably does so at 3NM out under bayDividerLon (see its comment in index.html).
+  const eastLons = [153.191782, 153.183238, 153.174694, 153.166150, 153.157606];
   let last = null;
   for (let i = 0; i < 5; i++) {
-    const p = { reg: key, lat: -27.30 - i * 0.01, lon: 153.140, track: 210, _dist_nm: 7 - i };
+    const p = { reg: key, lat: -27.30 - i * 0.01, lon: eastLons[i], track: 210, _dist_nm: 7 - i };
     last = mod.estimateBaySideCurrent(p, key);
   }
   assert.equal(last && last.name, '19L', 'a sustained side change must eventually win the majority vote');
