@@ -1795,6 +1795,14 @@ function updateAirportHeader() {
   let radarMarkers = new Map(); // key -> L.Marker
   let radarRing = null;
   let radarCenter = null;
+  let radarRunwayStrips = [];
+
+  // Physical runway strips to draw on the radar map, keyed by ICAO. Each pair names the two
+  // opposite-direction thresholds of the same paved strip (see the RUNWAYS.YBBN comment above).
+  // Only airports with thrLat/thrLon populated in RUNWAYS can be drawn; others render nothing.
+  const RUNWAY_STRIP_PAIRS = {
+    YBBN: [['01L', '19R'], ['01R', '19L']],
+  };
 
   function setViewMode(mode) {
     VIEW_MODE = (mode === 'radar') ? 'radar' : 'cards';
@@ -1849,6 +1857,37 @@ function updateAirportHeader() {
       fillColor: '#000000',
       fillOpacity: 0.2
     }).addTo(radarMap);
+
+    drawRunwayStrips();
+  }
+
+  function drawRunwayStrips() {
+    if (!radarMap || typeof window.L === 'undefined') return;
+
+    for (const layer of radarRunwayStrips) {
+      try { radarMap.removeLayer(layer); } catch (e) {}
+    }
+    radarRunwayStrips = [];
+
+    const icao = (APT && APT.icao) ? String(APT.icao).toUpperCase() : '';
+    const rwys = (RUNWAYS && RUNWAYS[icao]) || [];
+    const pairs = RUNWAY_STRIP_PAIRS[icao] || [];
+    if (!rwys.length || !pairs.length) return;
+
+    for (const [nameA, nameB] of pairs) {
+      const a = rwys.find(r => r.name === nameA);
+      const b = rwys.find(r => r.name === nameB);
+      if (!a || !b || typeof a.thrLat !== 'number' || typeof a.thrLon !== 'number' ||
+          typeof b.thrLat !== 'number' || typeof b.thrLon !== 'number') continue;
+
+      const strip = L.polyline([[a.thrLat, a.thrLon], [b.thrLat, b.thrLon]], {
+        weight: 4,
+        opacity: 0.55,
+        color: '#f1f2f4'
+      }).addTo(radarMap);
+      strip.bindTooltip(`RWY ${nameA}/${nameB}`, { sticky: true });
+      radarRunwayStrips.push(strip);
+    }
   }
 
   function radarRecenter() {
@@ -1857,6 +1896,7 @@ function updateAirportHeader() {
     radarMap.setView(center, Math.max(radarMap.getZoom(), 8));
     if (radarRing) radarRing.setLatLng(center);
     if (radarCenter) radarCenter.setLatLng(center);
+    drawRunwayStrips();
   }
 
   function makeAircraftIcon(label, headingDeg, typeCode) {
@@ -2480,34 +2520,17 @@ function airlineNameFromFlight(flight) {
   };
 
   // Picks the RWY chip's markup. `rwy`/`rwyLevel` are the gated (<=2NM, locked/confirmed) values;
-  // `rawRwy`/`rawRwyLevel` are the same ungated values the spotting popup already uses; `dnm` is
-  // the aircraft's current distance in NM. When the gated value is missing (still beyond 2NM) we
-  // still show a muted/grey "estimate" chip so it can never be mistaken for the confirmed
-  // high/likely chip -- but for a parallel-runway call (19L/19R, 01L/01R -- thresholds under 1NM
-  // apart) we only name the guessed side once inside RUNWAY_GUESS_NM, where the aircraft is
-  // established on final and genuinely tracking one side's heading. Beyond that range the guess is
-  // little better than a coin flip (see predictRunwayGeometry's MIN_LR_MARGIN_NM handling), and
-  // in-memory state (runwayLockCache, bayEntryCache, getRecentConfirmedFamily) resets on every
-  // page load, so a guess that looked solid before a reload can flip sides after one with no
-  // visual difference -- so hedge with a generic "confirming" message that far out instead.
-  // A rawRwyLevel of 'guess' (a thin cross-track margin, or the coarse no-centerline-data
-  // fallback -- see predictRunwayGeometry) gets the same hedge regardless of distance: that
-  // level means the L/R pick genuinely isn't backed by real evidence yet, so naming it even
-  // close-in would just be confidently wrong instead of confidently right.
+  // `rawRwy`/`rawRwyLevel` (the ungated values the spotting popup uses) and `dnm` are accepted
+  // for signature compatibility with that popup but intentionally unused here: until the gated
+  // value locks in at <=2NM, the chip never names a side (parallel thresholds are under 1NM
+  // apart and in-memory lock/bay-entry state resets on every reload, so an early guess can flip
+  // sides with no visual difference) -- it just points at the map's runway strips instead.
   function runwayChipHtml(rwy, rwyLevel, rawRwy, rawRwyLevel, icon, dnm) {
     if (rwy) {
       const cls = rwyLevel === 'high' ? 'tag-runway-high' : 'tag-runway-likely';
       return `<div class="tag tag-runway ${cls}">${icon}RWY ${rwy}</div>`;
     }
-    if (rawRwy) {
-      const closeEnoughToGuess = (typeof dnm === 'number' && Number.isFinite(dnm) && dnm <= RUNWAY_GUESS_NM);
-      const lowConfidenceSide = rawRwyLevel === 'guess';
-      if (/[LR]$/i.test(rawRwy) && (!closeEnoughToGuess || lowConfidenceSide)) {
-        return `<div class="tag tag-runway tag-runway-estimate">${icon}Runway confirmation incoming</div>`;
-      }
-      return `<div class="tag tag-runway tag-runway-estimate">${icon}RWY ${rawRwy}</div>`;
-    }
-    return '';
+    return `<div class="tag tag-runway tag-runway-estimate">${icon}Check map to confirm runway</div>`;
   }
 
   function render(list) {
