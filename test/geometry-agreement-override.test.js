@@ -130,6 +130,7 @@ function loadModule() {
     extractFunction(html, 'getRecentConfirmedFamily'),
     extractStatement(html, 'const GEOMETRY_AGREEMENT_MIN_STREAK ='),
     extractStatement(html, 'const GEOMETRY_AGREEMENT_MIN_SPAN_NM ='),
+    extractStatement(html, 'const GEOMETRY_AGREEMENT_MAX_GAP_MS ='),
     extractFunction(html, 'recordGeometryAgreement'),
     extractFunction(html, 'getSustainedGeometrySide'),
     extractFunction(html, 'predictRunwayForAircraft'),

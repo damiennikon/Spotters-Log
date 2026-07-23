@@ -1249,6 +1249,23 @@ const GEOMETRY_AGREEMENT_MIN_STREAK = 3;
 // mistaken for "sustained" evidence spread over real time and distance.
 const GEOMETRY_AGREEMENT_MIN_SPAN_NM = 1.0;
 
+// The distance-span guard above assumes every recorded read came from continuous, dense polling
+// (AUTO_REFRESH_MS's ~10s cadence, backing off to at most MAX_AUTO_REFRESH_MS's 30s) -- but a
+// backgrounded mobile tab can silently skip several polls' worth of real time (background tabs
+// throttle/pause setTimeout; see scheduleNextAutoRefresh and the visibilitychange handler, which
+// only fires ONE immediate refresh() on return). That single post-gap poll can land several NM
+// away from the last-recorded one, which satisfies GEOMETRY_AGREEMENT_MIN_SPAN_NM "for free" --
+// not because 3 consecutive polls actually converged over that distance, but because the polls
+// in between were simply never taken. Two real pre-gap blips (same side, too close together to
+// qualify on their own) plus one real post-gap blip can then misread as a genuinely sustained,
+// widely-spread streak and wrongly override an already-correct bay-side answer the instant the
+// app returns to the foreground. Any inter-poll gap bigger than this is presumed to mean "we
+// weren't continuously watching," so it resets the streak to a fresh count of 1 (exactly like a
+// non-matching read does) instead of extending it -- a background gap can never substitute for
+// genuinely dense, sustained agreement. Set well above MAX_AUTO_REFRESH_MS's 30s backoff ceiling
+// so ordinary retry/backoff catch-up never trips it.
+const GEOMETRY_AGREEMENT_MAX_GAP_MS = 60 * 1000;
+
 function pruneGeometryAgreementCache(activeKeys) {
   const now = Date.now();
   const TTL_MS = 20 * 60 * 1000; // 20 minutes, same as the other per-aircraft caches
@@ -1300,7 +1317,12 @@ function recordGeometryAgreement(key, precise, dnm) {
     ? precise.name : null;
   if (!name) { geometryAgreementCache.delete(key); return; }
   const prev = geometryAgreementCache.get(key);
-  if (prev && prev.name === name) {
+  // A gap this large means we weren't continuously polling -- see GEOMETRY_AGREEMENT_MAX_GAP_MS
+  // above -- so this read can't be trusted to extend the existing streak, even if the side
+  // matches: treat it the same as a fresh start, not as evidence "spread over real distance."
+  const gapped = !!(prev && typeof prev.ts === 'number' &&
+    (Date.now() - prev.ts) > GEOMETRY_AGREEMENT_MAX_GAP_MS);
+  if (prev && prev.name === name && !gapped) {
     prev.count += 1;
     if (typeof dnm === 'number' && Number.isFinite(dnm)) prev.lastDnm = dnm;
     prev.ts = Date.now();
