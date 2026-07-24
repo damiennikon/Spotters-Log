@@ -1962,10 +1962,17 @@ function updateAirportHeader() {
       const colorClass = CENTERLINE_CORRIDOR_CLASSES[pairIdx % CENTERLINE_CORRIDOR_CLASSES.length];
       const color = CENTERLINE_CORRIDOR_COLORS[colorClass];
 
-      for (const thr of [a, b]) {
-        if (typeof thr.heading !== 'number' || !Number.isFinite(thr.heading)) continue;
-        const outboundBearing = (thr.heading + 180) % 360;
+      // Derive the extension direction from the strip's own two threshold coordinates (the
+      // same vector the solid line above is drawn with), not from each runway's separately
+      // recorded `heading` field -- that field is rounded to the nearest degree, so it drifts
+      // visibly from the true threshold-to-threshold bearing the further the dashed line runs.
+      const bearingAtoB = bearingDeg(a.thrLat, a.thrLon, b.thrLat, b.thrLon);
+      const ends = [
+        { thr: a, outboundBearing: (bearingAtoB + 180) % 360 }, // continues past a, away from b
+        { thr: b, outboundBearing: bearingAtoB }                // continues past b, away from a
+      ];
 
+      for (const { thr, outboundBearing } of ends) {
         const farEnd = projectPointNm(thr.thrLat, thr.thrLon, outboundBearing, EXTENDED_CENTERLINE_NM);
         const extLine = L.polyline([[thr.thrLat, thr.thrLon], farEnd], {
           weight: 2,
