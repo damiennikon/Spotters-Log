@@ -350,6 +350,15 @@
   }
   .aircraft-icon{ background:transparent !important; border:0 !important; }
   .acIconContainer{ display:flex; flex-direction:column; align-items:center; gap:2px; }
+  .centerline-icon{ background:transparent !important; border:0 !important; }
+  .centerlineLabel{
+    padding:2px 6px; border-radius:var(--r-sm);
+    background:rgba(19,21,25,0.85);
+    font-size:10.5px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase;
+    font-family:'IBM Plex Mono',monospace; white-space:nowrap; text-align:center;
+  }
+  .centerlineLabel.blue{ color:var(--accent); border:1px solid var(--accent); }
+  .centerlineLabel.amber{ color:var(--warn); border:1px solid var(--warn); }
   .acWrap{ width:22px; height:22px; display:flex; align-items:center; justify-content:center; }
   .acPng{ width:22px; height:22px; display:block; background:transparent !important; border:0 !important; box-shadow:none !important; filter:brightness(0) invert(1) drop-shadow(0 1px 2px rgba(0,0,0,0.5)); }
 
@@ -1813,6 +1822,8 @@ function updateAirportHeader() {
   let radarRing = null;
   let radarCenter = null;
   let radarRunwayStrips = [];
+  let radarCenterlineExtensions = [];
+  let radarCenterlineLabels = [];
 
   // Physical runway strips to draw on the radar map, keyed by ICAO. Each pair names the two
   // opposite-direction thresholds of the same paved strip (see the RUNWAYS.YBBN comment above).
@@ -1820,6 +1831,39 @@ function updateAirportHeader() {
   const RUNWAY_STRIP_PAIRS = {
     YBBN: [['01L', '19R'], ['01R', '19L']],
   };
+
+  // How far past each threshold the dashed extended-centerline / approach-corridor line is
+  // drawn on the radar map. Purely a display aid -- not used by any prediction logic.
+  const EXTENDED_CENTERLINE_NM = 3;
+  // Each strip pair in RUNWAY_STRIP_PAIRS gets its own corridor color, matched to the pair's
+  // index (western 01L/19R strip first, eastern 01R/19L strip second).
+  const CENTERLINE_CORRIDOR_CLASSES = ['blue', 'amber'];
+  const CENTERLINE_CORRIDOR_COLORS = { blue: '#6c8dfa', amber: '#e6b352' };
+  // Slightly stagger each corridor's label distance (both still within the 70-80% window) so
+  // parallel-runway pairs don't land label-on-label at wide zoom, where the real-world lane
+  // spacing is only a pixel or two on screen.
+  const CENTERLINE_LABEL_FRACTIONS = [0.72, 0.78];
+
+  // Simple flat-earth projection for short display-only distances (a few NM at most) -- not a
+  // geodesic and not used anywhere near prediction logic, just for drawing map decorations.
+  function projectPointNm(lat0, lon0, bearingDegVal, distNm) {
+    const rad = Math.PI / 180;
+    const b = bearingDegVal * rad;
+    const dLat = (distNm / 60) * Math.cos(b);
+    const dLon = (distNm / 60) * Math.sin(b) / Math.cos(lat0 * rad);
+    return [lat0 + dLat, lon0 + dLon];
+  }
+
+  function makeCenterlineLabelIcon(name, colorClass) {
+    const safe = escapeHtml(name);
+    const html = `<div class="centerlineLabel ${colorClass}">${safe}</div>`;
+    return L.divIcon({
+      className: 'centerline-icon',
+      html,
+      iconSize: [40, 18],
+      iconAnchor: [20, 9]
+    });
+  }
 
   function setViewMode(mode) {
     VIEW_MODE = (mode === 'radar') ? 'radar' : 'cards';
@@ -1885,17 +1929,25 @@ function updateAirportHeader() {
       try { radarMap.removeLayer(layer); } catch (e) {}
     }
     radarRunwayStrips = [];
+    for (const layer of radarCenterlineExtensions) {
+      try { radarMap.removeLayer(layer); } catch (e) {}
+    }
+    radarCenterlineExtensions = [];
+    for (const layer of radarCenterlineLabels) {
+      try { radarMap.removeLayer(layer); } catch (e) {}
+    }
+    radarCenterlineLabels = [];
 
     const icao = (APT && APT.icao) ? String(APT.icao).toUpperCase() : '';
     const rwys = (RUNWAYS && RUNWAYS[icao]) || [];
     const pairs = RUNWAY_STRIP_PAIRS[icao] || [];
     if (!rwys.length || !pairs.length) return;
 
-    for (const [nameA, nameB] of pairs) {
+    pairs.forEach(([nameA, nameB], pairIdx) => {
       const a = rwys.find(r => r.name === nameA);
       const b = rwys.find(r => r.name === nameB);
       if (!a || !b || typeof a.thrLat !== 'number' || typeof a.thrLon !== 'number' ||
-          typeof b.thrLat !== 'number' || typeof b.thrLon !== 'number') continue;
+          typeof b.thrLat !== 'number' || typeof b.thrLon !== 'number') return;
 
       const strip = L.polyline([[a.thrLat, a.thrLon], [b.thrLat, b.thrLon]], {
         weight: 4,
@@ -1904,7 +1956,35 @@ function updateAirportHeader() {
       }).addTo(radarMap);
       strip.bindTooltip(`RWY ${nameA}/${nameB}`, { sticky: true });
       radarRunwayStrips.push(strip);
-    }
+
+      // Dashed extended centerline + identifier label past each threshold, one per runway
+      // name (both ends of the strip), colored by this strip's corridor.
+      const colorClass = CENTERLINE_CORRIDOR_CLASSES[pairIdx % CENTERLINE_CORRIDOR_CLASSES.length];
+      const color = CENTERLINE_CORRIDOR_COLORS[colorClass];
+
+      for (const thr of [a, b]) {
+        if (typeof thr.heading !== 'number' || !Number.isFinite(thr.heading)) continue;
+        const outboundBearing = (thr.heading + 180) % 360;
+
+        const farEnd = projectPointNm(thr.thrLat, thr.thrLon, outboundBearing, EXTENDED_CENTERLINE_NM);
+        const extLine = L.polyline([[thr.thrLat, thr.thrLon], farEnd], {
+          weight: 2,
+          opacity: 0.5,
+          color,
+          dashArray: '6 6'
+        }).addTo(radarMap);
+        radarCenterlineExtensions.push(extLine);
+
+        const labelFraction = CENTERLINE_LABEL_FRACTIONS[pairIdx % CENTERLINE_LABEL_FRACTIONS.length];
+        const labelPt = projectPointNm(thr.thrLat, thr.thrLon, outboundBearing, EXTENDED_CENTERLINE_NM * labelFraction);
+        const labelMarker = L.marker(labelPt, {
+          icon: makeCenterlineLabelIcon(thr.name, colorClass),
+          interactive: false,
+          keyboard: false
+        }).addTo(radarMap);
+        radarCenterlineLabels.push(labelMarker);
+      }
+    });
   }
 
   function radarRecenter() {
