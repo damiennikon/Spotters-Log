@@ -127,6 +127,23 @@
   }
 
   .row{ display:flex; justify-content:space-between; align-items:flex-start; gap:10px; }
+  .rowMain{ display:flex; align-items:flex-start; gap:10px; min-width:0; }
+
+  .acPhoto{
+    display:none; flex-direction:column; flex:0 0 auto; width:48px;
+    text-decoration:none; color:inherit;
+    opacity:0; transition:opacity .25s ease;
+  }
+  .acPhoto.loaded{ opacity:1; }
+  .acPhotoImg{
+    display:block; width:48px; height:48px; object-fit:cover;
+    border-radius:var(--r-sm); border:1px solid var(--border);
+    background:var(--surface-2);
+  }
+  .acPhotoAttr{
+    margin-top:2px; font-size:9px; line-height:1.2; color:var(--text-3);
+    max-width:48px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  }
 
   .flight{ font-weight:700; font-size:20px; letter-spacing:-0.2px; line-height:1.15; }
   .airline{ font-size:12.5px; color:var(--text-2); margin-top:4px; }
@@ -2633,11 +2650,17 @@ function airlineNameFromFlight(flight) {
 
       card.innerHTML = `
         <div class="row">
-          <div>
-            <div class="flight">${escapeHtml(pickLabel(it))}</div>
-            ${(()=>{ const f=(it.flight||"").trim(); const an=airlineNameFromFlight(f); const tp=aircraftTypePretty(it.t); return `<div class="airline">${escapeHtml(an)}</div>${tp ? `<div class="atype">${escapeHtml(tp)}</div>` : ""}`; })()}
-            ${it._route ? `<div class="small route">${escapeHtml(it._route.origin)} → ${escapeHtml(it._route.destination)}</div>` : ''}
-            <div class="small">${escapeHtml(pickSub(it))}</div>
+          <div class="rowMain">
+            <a class="acPhoto" target="_blank" rel="noopener">
+              <img class="acPhotoImg" alt="" />
+              <div class="acPhotoAttr"></div>
+            </a>
+            <div>
+              <div class="flight">${escapeHtml(pickLabel(it))}</div>
+              ${(()=>{ const f=(it.flight||"").trim(); const an=airlineNameFromFlight(f); const tp=aircraftTypePretty(it.t); return `<div class="airline">${escapeHtml(an)}</div>${tp ? `<div class="atype">${escapeHtml(tp)}</div>` : ""}`; })()}
+              ${it._route ? `<div class="small route">${escapeHtml(it._route.origin)} → ${escapeHtml(it._route.destination)}</div>` : ''}
+              <div class="small">${escapeHtml(pickSub(it))}</div>
+            </div>
           </div>
           <div class="cardBtns">
             <button class="spotBtn" type="button" data-rwy="${rawRwy || ''}" data-level="${rawRwyLevel || ''}" data-flight="${escapeHtml(pickLabel(it))}" aria-label="Best spotting position">${ICONS.eye}</button>
@@ -2658,6 +2681,8 @@ function airlineNameFromFlight(flight) {
       `;
 
       $cards.appendChild(card);
+
+      attachAircraftPhoto(card, it);
 
       const spotBtn = card.querySelector('button.spotBtn');
       if (spotBtn) {
@@ -2744,6 +2769,75 @@ function airlineNameFromFlight(flight) {
       .replaceAll('>','&gt;')
       .replaceAll('"','&quot;')
       .replaceAll("'",'&#39;');
+  }
+
+  // ===== Aircraft reference photo (Planespotters.net public Photo API) =====
+  // Fetched directly from the browser (never via proxy.php) so the request carries a real
+  // page Origin/Referer, per Planespotters' Terms of Use. Results (including "no photo
+  // found") are cached in-memory per hex/reg for the session so auto-refresh doesn't
+  // refire lookups for aircraft already resolved.
+  const AC_PHOTO_TTL_MS = 24 * 60 * 60 * 1000;
+  const acPhotoCache = new Map();
+
+  async function fetchPlanespottersPhoto(url) {
+    try {
+      const resp = await fetch(url);
+      if (!resp.ok) return null;
+      const json = await resp.json();
+      if (!json || json.error) return null;
+      const photos = Array.isArray(json.photos) ? json.photos : [];
+      const p = photos[0];
+      if (!p || !p.thumbnail || !p.thumbnail.src) return null;
+      return {
+        src: p.thumbnail.src,
+        link: (typeof p.link === 'string' && /^https?:\/\//i.test(p.link)) ? p.link : null,
+        photographer: (typeof p.photographer === 'string' && p.photographer.trim()) ? p.photographer.trim() : 'Unknown',
+      };
+    } catch (e) {
+      return null;
+    }
+  }
+
+  async function getAircraftPhoto(it) {
+    const hex = (it.hex || '').toString().trim().toLowerCase();
+    const reg = ((it.r || it.reg || '').toString().trim()).toUpperCase();
+    const cacheKey = hex ? `hex:${hex}` : (reg ? `reg:${reg}` : null);
+    if (!cacheKey) return null;
+
+    const cached = acPhotoCache.get(cacheKey);
+    if (cached && (Date.now() - cached.ts) < AC_PHOTO_TTL_MS) {
+      return cached.data;
+    }
+
+    let photo = null;
+    if (hex) {
+      photo = await fetchPlanespottersPhoto(`https://api.planespotters.net/pub/photos/hex/${encodeURIComponent(hex)}`);
+    }
+    if (!photo && reg) {
+      photo = await fetchPlanespottersPhoto(`https://api.planespotters.net/pub/photos/reg/${encodeURIComponent(reg)}`);
+    }
+
+    acPhotoCache.set(cacheKey, { data: photo, ts: Date.now() });
+    return photo;
+  }
+
+  function attachAircraftPhoto(card, it) {
+    const wrap = card.querySelector('.acPhoto');
+    if (!wrap) return;
+    if (!(it.hex || it.r || it.reg)) return;
+
+    getAircraftPhoto(it).then(photo => {
+      if (!photo || !card.isConnected) return;
+      const img = wrap.querySelector('.acPhotoImg');
+      const attr = wrap.querySelector('.acPhotoAttr');
+      img.src = photo.src;
+      img.alt = `Photo: ${photo.photographer}`;
+      attr.textContent = `Photo: ${photo.photographer}`;
+      if (photo.link) wrap.href = photo.link;
+      else wrap.removeAttribute('href');
+      wrap.style.display = 'flex';
+      requestAnimationFrame(() => wrap.classList.add('loaded'));
+    });
   }
 
   async function tryFetchWithProxy(proxyPath) {
