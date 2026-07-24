@@ -2779,6 +2779,13 @@ function airlineNameFromFlight(flight) {
   const AC_PHOTO_TTL_MS = 24 * 60 * 60 * 1000;
   const acPhotoCache = new Map();
 
+  // Hand-added local photos for specific tails Planespotters has no photo of yet.
+  // These are ordinary repo assets (not Planespotters CDN images), so the "never store the
+  // image binary" rule doesn't apply — they're only used when the live API comes back empty.
+  const LOCAL_FALLBACK_PHOTOS = {
+    'VH-VGV': { src: './photos/fallback/VH-VGV.jpg', link: null, photographer: null },
+  };
+
   async function fetchPlanespottersPhoto(url) {
     try {
       const resp = await fetch(url);
@@ -2816,6 +2823,9 @@ function airlineNameFromFlight(flight) {
     if (!photo && reg) {
       photo = await fetchPlanespottersPhoto(`https://api.planespotters.net/pub/photos/reg/${encodeURIComponent(reg)}`);
     }
+    if (!photo && reg && LOCAL_FALLBACK_PHOTOS[reg]) {
+      photo = LOCAL_FALLBACK_PHOTOS[reg];
+    }
 
     acPhotoCache.set(cacheKey, { data: photo, ts: Date.now() });
     return photo;
@@ -2831,8 +2841,15 @@ function airlineNameFromFlight(flight) {
       const img = wrap.querySelector('.acPhotoImg');
       const attr = wrap.querySelector('.acPhotoAttr');
       img.src = photo.src;
-      img.alt = `Photo: ${photo.photographer}`;
-      attr.textContent = `Photo: ${photo.photographer}`;
+      if (photo.photographer) {
+        img.alt = `Photo: ${photo.photographer}`;
+        attr.textContent = `Photo: ${photo.photographer}`;
+        attr.style.display = '';
+      } else {
+        img.alt = '';
+        attr.textContent = '';
+        attr.style.display = 'none';
+      }
       if (photo.link) wrap.href = photo.link;
       else wrap.removeAttribute('href');
       wrap.style.display = 'flex';
