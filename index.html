@@ -352,6 +352,7 @@
     overflow:hidden; border:1px solid var(--border); box-shadow:var(--sh-card);
   }
   .radarHint{ margin-top:10px; color:var(--text-3); font-size:12px; line-height:1.5; }
+  .radarHint b{ color:var(--accent); font-weight:700; }
   .acPlane{ width:18px; height:18px; transform-origin:50% 50%; filter:drop-shadow(0 2px 3px rgba(0,0,0,0.45)); opacity:0.95; color:var(--accent); }
   .acLabel{
     margin-top:2px; padding:2px 7px; border-radius:999px;
@@ -481,7 +482,7 @@
           <button class="btn ghost viewBtn active" id="radarFilterBothBtn" data-radar-filter="both" type="button">Both</button>
         </div>
         <div id="radarMap" role="application" aria-label="Inbound radar map"></div>
-        <div class="radarHint">Arrivals (white) and departures (violet) plotted top-down. Ring = 30 NM. Tap a marker for details.</div>
+        <div class="radarHint">Arrivals (white) and departures (violet) plotted top-down. Ring = 30 NM. Tap a marker for details. <b>Zoom in near the airport to see runway guides.</b></div>
       </div>
 
 
