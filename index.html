@@ -95,9 +95,12 @@
   .btn.viewBtn{ padding:8px 13px; }
   .btn.viewBtn.active{ background:var(--accent-soft); border-color:var(--accent-border); color:var(--accent); }
 
-  /* Mode row (Arrivals/Departures) sits above the Cards/Radar row; both reuse .btn.viewBtn. */
-  .modeRow{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:12px; }
+  /* Mode row (Arrivals/Departures) sits above the Cards/Radar row; both reuse .btn.viewBtn.
+     Top/bottom margins match the 14px section rhythm used elsewhere (.meta, .cards, .radarWrap);
+     the tighter 8px between the two rows ties them together as one control cluster. */
+  .modeRow{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:14px; }
   .modeRow + .modeRow{ margin-top:8px; }
+  .modeRow .btn.viewBtn{ flex:1 1 0; text-align:center; }
 
   /* Small filter row inside Radar view (Arrivals/Departures/Both), independent of .modeRow above. */
   .radarFilterRow{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-bottom:10px; }
