@@ -95,6 +95,14 @@
   .btn.viewBtn{ padding:8px 13px; }
   .btn.viewBtn.active{ background:var(--accent-soft); border-color:var(--accent-border); color:var(--accent); }
 
+  /* Mode row (Arrivals/Departures) sits above the Cards/Radar row; both reuse .btn.viewBtn. */
+  .modeRow{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-top:12px; }
+  .modeRow + .modeRow{ margin-top:8px; }
+
+  /* Small filter row inside Radar view (Arrivals/Departures/Both), independent of .modeRow above. */
+  .radarFilterRow{ display:flex; align-items:center; gap:6px; flex-wrap:wrap; margin-bottom:10px; }
+  .radarFilterRow .btn.viewBtn{ padding:6px 11px; font-size:11.5px; }
+
   .pill{
     display:flex; align-items:center; gap:8px;
     border:1px solid var(--border); background:var(--surface);
@@ -161,6 +169,9 @@
   .tag svg{ width:12px; height:12px; }
   .tag.arriving{ color:var(--ok); background:var(--ok-soft); border-color:var(--ok-border); }
   .tag.landing{ color:var(--accent); background:var(--accent-soft); border-color:var(--accent-border); }
+  /* Departures get their own violet, matching the radar icon tint (#c77dff) — kept distinct from
+     green (confirmed/locked), amber (01R/19L corridor) and blue (01L/19R corridor). */
+  .tag.departing{ color:#c77dff; background:rgba(199,125,255,0.10); border-color:rgba(199,125,255,0.30); }
   .tag.tag-heavy{ color:var(--warn); background:var(--warn-soft); border-color:var(--warn-border); }
   .tag.tag-runway.tag-runway-high{ color:var(--accent); background:var(--accent-soft); border-color:var(--accent-border); }
   .tag.tag-runway.tag-runway-likely{ color:var(--warn); background:var(--warn-soft); border-color:var(--warn-border); }
@@ -364,6 +375,15 @@
   .centerlineLegendSwatch.amber{ background:var(--warn); }
   .acWrap{ width:22px; height:22px; display:flex; align-items:center; justify-content:center; }
   .acPng{ width:22px; height:22px; display:block; background:transparent !important; border:0 !important; box-shadow:none !important; filter:brightness(0) invert(1) drop-shadow(0 1px 2px rgba(0,0,0,0.5)); }
+  /* Departure variant: same icon shape, filled violet (#c77dff) via mask instead of the
+     arrival's invert-to-white filter, so shape/rotation logic (makeAircraftIcon) stays identical
+     and only the fill color differs. */
+  .acPngDep{
+    width:22px; height:22px; display:block; background:#c77dff;
+    -webkit-mask-repeat:no-repeat; -webkit-mask-position:center; -webkit-mask-size:contain;
+    mask-repeat:no-repeat; mask-position:center; mask-size:contain;
+    filter:drop-shadow(0 1px 2px rgba(0,0,0,0.5));
+  }
 
   @media (prefers-reduced-motion: reduce){
     *{ animation-duration:0.001ms !important; transition-duration:0.001ms !important; }
@@ -388,14 +408,21 @@
       <div class="actions">
         <button class="btn ghost" id="airportBtn" type="button">Airport</button>
         <button class="btn ghost" id="savedBtn" type="button">Saved 0</button>
-        <button class="btn ghost viewBtn active" id="viewCardsBtn" type="button">Cards</button>
-        <button class="btn ghost viewBtn" id="viewRadarBtn" type="button">Radar</button>
         <button class="btn" id="refreshBtn" type="button">Refresh</button>
         <div class="pill" id="statusPill" title="Network status" role="status" aria-live="polite">
           <div class="dot" id="statusDot" aria-hidden="true"></div>
           <div id="statusText">Ready</div>
         </div>
       </div>
+    </div>
+
+    <div class="modeRow">
+      <button class="btn ghost viewBtn active" id="modeArrivalsBtn" type="button">Arrivals</button>
+      <button class="btn ghost viewBtn" id="modeDeparturesBtn" type="button">Departures</button>
+    </div>
+    <div class="modeRow">
+      <button class="btn ghost viewBtn active" id="viewCardsBtn" type="button">Cards</button>
+      <button class="btn ghost viewBtn" id="viewRadarBtn" type="button">Radar</button>
     </div>
 
     <div class="meta">
@@ -448,8 +475,13 @@
   </div>
 
       <div id="radarWrap" class="radarWrap" aria-label="Radar view">
+        <div class="radarFilterRow" id="radarFilterRow">
+          <button class="btn ghost viewBtn" id="radarFilterArrivalsBtn" data-radar-filter="arrivals" type="button">Arrivals</button>
+          <button class="btn ghost viewBtn" id="radarFilterDeparturesBtn" data-radar-filter="departures" type="button">Departures</button>
+          <button class="btn ghost viewBtn active" id="radarFilterBothBtn" data-radar-filter="both" type="button">Both</button>
+        </div>
         <div id="radarMap" role="application" aria-label="Inbound radar map"></div>
-        <div class="radarHint">Shows the same inbound list as Cards, plotted top-down. Ring = 30 NM. Tap a marker for details.</div>
+        <div class="radarHint">Arrivals (white) and departures (violet) plotted top-down. Ring = 30 NM. Tap a marker for details.</div>
       </div>
 
 
@@ -457,6 +489,7 @@
 
     <div class="note" style="margin-top: 18px;">
       <b>Rules:</b> ≤30NM, ≤12,000ft. Mid‑range (20–30NM): ≥160kt + not climbing. Short‑range (≤20NM): descending preferred (short‑final allowed) + ≥140kt. Very‑short‑final override: ≤6NM + ≤3,000ft + ≥100kt. Seen ≤90s. Max 10.<br/><br/>
+      <b>Departures:</b> detected on the takeoff-roll/rotation transition (≥80kt + climbing &gt;300fpm) within a few NM of the field, tracked until 8NM out. No runway prediction yet.<br/><br/>
       Tip: this is live ADS‑B, not an official airport schedule. The goal is “what’s actually inbound right now”.
     </div>
   </div>
@@ -1751,6 +1784,7 @@ loadRunwayLockCache();
 loadBayEntryCache();
 loadBaySideHistoryCache();
 loadGeometryAgreementCache();
+loadDepartureTrackCache();
 
 function updateAirportHeader() {
   const $name = document.getElementById("aptName");
@@ -1810,14 +1844,181 @@ function updateAirportHeader() {
     veryShortMaxClimbFpm: 300,
   };
 
+  // ===== Departures =====
+  // Deliberately separate from RULES/isInboundCandidate above -- departures are detected on a
+  // ground/taxi -> rotation transition, not on any of the arrivals distance/speed/heading bands.
+  const DEP_RULES = {
+    // How close to the airport the takeoff transition (see minRotationKt/minClimbFpm below) must
+    // be observed. Keeps this from firing on aircraft already established in climb well away from
+    // the field -- this is about catching departures leaving THIS airport, not any climbing jet.
+    detectMaxNM: 5,
+    // Rotation/takeoff-roll ground speed floor. Deliberately paired with minClimbFpm below rather
+    // than used alone: a fast taxi/backtrack can still be well under this, but even if it briefly
+    // wasn't, it has ~no vertical rate, so the climb-rate gate keeps it out.
+    minRotationKt: 80,
+    minClimbFpm: 300,
+    // "Recently on ground" precondition: near field elevation with taxi-range ground speed.
+    groundMaxAltFt: 50,
+    groundMaxGs: 35,
+    // Fallback for an aircraft first observed already climbing (e.g. app opened mid-departure):
+    // only takes the transition at face value if it's still low enough to plausibly be a fresh
+    // departure, not a jet that's been climbing for a while and just entered the fetch radius.
+    earlyClimbMaxAltFt: 5000,
+    // Once classified, keep tracking/showing the departure until it's this far out, regardless of
+    // its speed/altitude/climb at that point.
+    cutoffNM: 8,
+  };
+
+  // Per-aircraft departure tracking state, keyed the same way as runwayLockCache/bayEntryCache
+  // (getRunwayCacheKey) so a departure only has to satisfy the ground->rotation transition once;
+  // after that it's tracked purely by distance-out until DEP_RULES.cutoffNM.
+  const departureTrackCache = new Map();
+  const DEPARTURE_TRACK_STORE_KEY = "photolog_departure_track_v1";
+
+  function pruneDepartureTrackCache(activeKeys) {
+    const now = Date.now();
+    const TTL_MS = 20 * 60 * 1000; // 20 minutes, same as runwayLockCache/bayEntryCache
+    for (const [k, v] of departureTrackCache.entries()) {
+      if (!k) { departureTrackCache.delete(k); continue; }
+      if (activeKeys && !activeKeys.has(k) && (now - (v.ts || 0)) > TTL_MS) {
+        departureTrackCache.delete(k);
+      }
+    }
+  }
+
+  function saveDepartureTrackCache() {
+    try {
+      const icao = (APT && APT.icao) ? String(APT.icao).toUpperCase() : '';
+      if (!icao) return;
+      localStorage.setItem(DEPARTURE_TRACK_STORE_KEY,
+        JSON.stringify({ icao, entries: Array.from(departureTrackCache.entries()) }));
+    } catch {}
+  }
+
+  function loadDepartureTrackCache() {
+    try {
+      const icao = (APT && APT.icao) ? String(APT.icao).toUpperCase() : '';
+      if (!icao) return;
+      const raw = localStorage.getItem(DEPARTURE_TRACK_STORE_KEY);
+      if (!raw) return;
+      const o = JSON.parse(raw);
+      if (!o || typeof o !== 'object' || o.icao !== icao || !Array.isArray(o.entries)) return;
+      for (const [k, v] of o.entries) {
+        if (k && v && typeof v.ts === 'number') departureTrackCache.set(k, v);
+      }
+      pruneDepartureTrackCache(new Set());
+    } catch {}
+  }
+
+  // Same per-airport-switch reasoning as resetRunwayPredictionCaches: an in-progress departure
+  // classification only means anything relative to the airport it was recorded under.
+  function resetDepartureTrackingCache() {
+    departureTrackCache.clear();
+    try { localStorage.removeItem(DEPARTURE_TRACK_STORE_KEY); } catch {}
+  }
+
+  // alt_baro/alt_geom can arrive as the literal string "ground" for an aircraft on the ground
+  // (rather than a number) -- ft() only handles numbers, so ground-state detection needs its own
+  // reader that treats "ground" as 0ft.
+  function rawAltFtForDeparture(p) {
+    const raw = (p && p.alt_baro !== undefined && p.alt_baro !== null) ? p.alt_baro : (p && p.alt_geom);
+    if (typeof raw === 'string' && raw.trim().toLowerCase() === 'ground') return 0;
+    return ft(raw);
+  }
+
+  function isTaxiGroundState(p) {
+    const alt = rawAltFtForDeparture(p);
+    const gs = kt(p.gs);
+    if (alt == null || gs == null) return false;
+    return alt <= DEP_RULES.groundMaxAltFt && gs <= DEP_RULES.groundMaxGs;
+  }
+
+  // The "just took off" signal: rotation-range ground speed AND a positive, meaningful climb
+  // rate together -- see DEP_RULES.minRotationKt/minClimbFpm above for why GS alone isn't enough.
+  function isRotationTransition(p) {
+    const gs = kt(p.gs);
+    const br = (typeof p.baro_rate === 'number') ? p.baro_rate : (typeof p.geom_rate === 'number' ? p.geom_rate : null);
+    if (gs == null || gs < DEP_RULES.minRotationKt) return false;
+    if (br == null || br < DEP_RULES.minClimbFpm) return false;
+    return true;
+  }
+
+  // Returns the subset of `ac` currently classed as departures, each tagged with _kind, _dist_nm
+  // and _depSinceMs (ms since the takeoff transition was first observed). Independent pipeline
+  // from isInboundCandidate/RULES above -- an aircraft can appear in at most one of the two lists
+  // in practice (the transition's climb-rate floor and the arrivals rules' climb-rate ceilings
+  // don't overlap at the ranges each applies).
+  function classifyDepartures(ac) {
+    const out = [];
+    const now = Date.now();
+
+    for (const p of (ac || [])) {
+      if (typeof p.lat !== 'number' || typeof p.lon !== 'number') continue;
+      if (isGroundish(p)) continue;
+
+      const key = getRunwayCacheKey(p);
+      if (!key) continue;
+
+      const dnm = distNM(p.lat, p.lon, APT.lat, APT.lon);
+      const track = departureTrackCache.get(key);
+
+      if (track && track.classifiedAt) {
+        // Already confirmed departing -- just track distance-out until the cutoff.
+        if (!(typeof dnm === 'number' && isFinite(dnm)) || dnm > DEP_RULES.cutoffNM) {
+          departureTrackCache.delete(key);
+          continue;
+        }
+        track.ts = now;
+        p._dist_nm = dnm;
+        p._depSinceMs = now - track.classifiedAt;
+        p._kind = 'departure';
+        out.push(p);
+        continue;
+      }
+
+      if (typeof dnm === 'number' && isFinite(dnm) && dnm <= DEP_RULES.detectMaxNM && isRotationTransition(p)) {
+        const alt = rawAltFtForDeparture(p);
+        const seenOnGroundBefore = !!track; // recorded a taxi/ground observation on an earlier poll
+        const firstObservedClimbing = !track && (alt == null || alt <= DEP_RULES.earlyClimbMaxAltFt);
+        if (seenOnGroundBefore || firstObservedClimbing) {
+          departureTrackCache.set(key, { ts: now, classifiedAt: now });
+          p._dist_nm = dnm;
+          p._depSinceMs = 0;
+          p._kind = 'departure';
+          out.push(p);
+          continue;
+        }
+      }
+
+      if (typeof dnm === 'number' && isFinite(dnm) && dnm <= DEP_RULES.detectMaxNM && isTaxiGroundState(p)) {
+        departureTrackCache.set(key, { ts: now });
+      } else if (track) {
+        track.ts = now; // keep the ground-memory entry alive while still in the feed
+      }
+    }
+
+    return out.sort((a, b) => a._dist_nm - b._dist_nm);
+  }
+
   // ===== DOM =====
   const $cards = document.getElementById('cards');
   const $radarWrap = document.getElementById('radarWrap');
   const $viewCardsBtn = document.getElementById('viewCardsBtn');
   const $viewRadarBtn = document.getElementById('viewRadarBtn');
+  const $modeArrivalsBtn = document.getElementById('modeArrivalsBtn');
+  const $modeDeparturesBtn = document.getElementById('modeDeparturesBtn');
+  const $radarFilterBtns = Array.from(document.querySelectorAll('#radarFilterRow [data-radar-filter]'));
 
   // ===== View state =====
   let VIEW_MODE = 'cards';
+  // Cards-view dataset toggle (Arrivals/Departures) — independent of the Radar-view filter below.
+  let LIST_MODE = 'arrivals';
+  // Radar-view-only filter (Arrivals/Departures/Both). Independent of LIST_MODE: Radar always has
+  // its own filter and defaults to showing both datasets at once.
+  let RADAR_FILTER = 'both';
+  // Last-computed combined (arrivals + departures) list handed to the radar, kept so switching
+  // into Radar view (or changing RADAR_FILTER) can redraw without waiting for the next refresh.
+  let CURRENT_RADAR_LIST = [];
 
   // ===== Radar (Leaflet) =====
   let radarMap = null;
@@ -1882,8 +2083,32 @@ function updateAirportHeader() {
 
     if (VIEW_MODE === 'radar') {
       ensureRadarMap();
-      try { updateRadar(CURRENT_LIST || []); } catch (e) {}
+      try { updateRadar(CURRENT_RADAR_LIST || []); } catch (e) {}
     }
+  }
+
+  // Cards-view Arrivals/Departures toggle. Swaps which dataset is rendered into #cards; does not
+  // touch VIEW_MODE (Cards/Radar) or RADAR_FILTER (Radar's own, separate filter).
+  function setListMode(mode) {
+    LIST_MODE = (mode === 'departures') ? 'departures' : 'arrivals';
+    if ($modeArrivalsBtn) $modeArrivalsBtn.classList.toggle('active', LIST_MODE === 'arrivals');
+    if ($modeDeparturesBtn) $modeDeparturesBtn.classList.toggle('active', LIST_MODE === 'departures');
+
+    if (LIST_MODE === 'departures') {
+      renderDepartureCards(CURRENT_DEPARTURES || []);
+    } else {
+      render(CURRENT_ARRIVALS || []);
+    }
+  }
+
+  // Radar-view-only filter (Arrivals/Departures/Both). Redraws immediately from the last-computed
+  // combined list rather than waiting for the next poll.
+  function setRadarFilter(filter) {
+    RADAR_FILTER = (filter === 'arrivals' || filter === 'departures') ? filter : 'both';
+    for (const btn of $radarFilterBtns) {
+      btn.classList.toggle('active', btn.getAttribute('data-radar-filter') === RADAR_FILTER);
+    }
+    try { updateRadar(CURRENT_RADAR_LIST || []); } catch (e) {}
   }
 
   function ensureRadarMap() {
@@ -2014,7 +2239,9 @@ function updateAirportHeader() {
     drawRunwayStrips();
   }
 
-  function makeAircraftIcon(label, headingDeg, typeCode) {
+  // `kind` is 'arrival' (default, unchanged white icon) or 'departure' (violet #c77dff fill via
+  // CSS mask — see .acPngDep). Shape/rotation/type-PNG selection logic is identical either way.
+  function makeAircraftIcon(label, headingDeg, typeCode, kind) {
     const rot = (typeof headingDeg === 'number' && isFinite(headingDeg)) ? headingDeg : 0;
     const safe = escapeHtml(label);
 
@@ -2041,10 +2268,21 @@ else if (fn === '747.png') {
     const __v = (typeof window !== 'undefined' && (window.APP_VERSION || window.appVersion)) ? (window.APP_VERSION || window.appVersion) : '0';
     const src = `/photo-log/icons/aircraft/${fn}?v=${encodeURIComponent(__v)}`;
 
+    const isDeparture = kind === 'departure';
+    // Departures: a plain div masked by the same PNG (alpha channel), filled with a background
+    // color, so the icon reads as violet regardless of the source PNG's own colors — the arrival
+    // <img> path (filter:invert to white) is untouched. Deliberately NOT also given the .acPng
+    // class: .acPng sets `background:transparent !important`, which would beat .acPngDep's fill
+    // color regardless of rule order/specificity -- .acPngDep declares its own width/height/
+    // display standalone so it doesn't need .acPng at all.
+    const bodyHtml = isDeparture
+      ? `<div class="acPngDep" style="-webkit-mask-image:url('${src}');mask-image:url('${src}');"></div>`
+      : `<img class="acPng" src="${src}" alt="" />`;
+
     const html = `
       <div class="acIconContainer">
         <div class="acWrap" style="transform: rotate(${rot}deg);">
-          <img class="acPng" src="${src}" alt="" />
+          ${bodyHtml}
         </div>
         <div class="acLabel">${safe}</div>
       </div>
@@ -2058,14 +2296,23 @@ else if (fn === '747.png') {
     });
   }
 
+  // Applies RADAR_FILTER (Arrivals/Departures/Both — independent of the Cards-view LIST_MODE
+  // toggle) to the combined arrivals+departures list before it's plotted.
+  function filterForRadar(list) {
+    if (RADAR_FILTER === 'both') return list || [];
+    const wantKind = RADAR_FILTER === 'departures' ? 'departure' : 'arrival';
+    return (list || []).filter(it => (it._kind || 'arrival') === wantKind);
+  }
+
   function updateRadar(list) {
     if (VIEW_MODE !== 'radar') return;
     ensureRadarMap();
     if (!radarMap || typeof window.L === 'undefined') return;
 
     const keep = new Set();
+    const shown = filterForRadar(list);
 
-    for (const it of (list || [])) {
+    for (const it of shown) {
       const lat = it.lat;
       const lon = it.lon;
       if (typeof lat !== 'number' || typeof lon !== 'number') continue;
@@ -2082,7 +2329,7 @@ else if (fn === '747.png') {
       const label = (it.flight || it.r || it.t || it.hex || '—').toString().trim() || '—';
 
       const typeCode = (it.t || it.type || it.icao_type || it.ac_type || it.aircraft_type || '').toString().trim();
-      const icon = makeAircraftIcon(label, hdg, typeCode);
+      const icon = makeAircraftIcon(label, hdg, typeCode, it._kind);
       let m = radarMarkers.get(key);
       if (!m) {
         m = L.marker([lat, lon], { icon, keyboard: false });
@@ -2253,7 +2500,7 @@ function resetRunwayPredictionCaches() {
 
 function applySelectedAirport(apt) {
   if (!apt) return false;
-  if (!APT || APT.icao !== apt.icao) resetRunwayPredictionCaches();
+  if (!APT || APT.icao !== apt.icao) { resetRunwayPredictionCaches(); resetDepartureTrackingCache(); }
   APT = apt;
   saveAirport(apt);
   updateAirportHeader();
@@ -2620,6 +2867,10 @@ function airlineNameFromFlight(flight) {
   }
 
   let CURRENT_LIST = [];
+  // Last-computed per-dataset lists, kept so setListMode() can redraw #cards when the user flips
+  // the Arrivals/Departures toggle without waiting for the next poll.
+  let CURRENT_ARRIVALS = [];
+  let CURRENT_DEPARTURES = [];
 
   const ICONS = {
     clock: `<svg width="12" height="12" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M10 6.5V10l2.5 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`,
@@ -2665,9 +2916,6 @@ function airlineNameFromFlight(flight) {
         </div>
       `;
       $cards.appendChild(empty);
-
-      // Radar markers (additive-only)
-      try { updateRadar([]); } catch (e) {}
       return;
     }
 
@@ -2803,9 +3051,6 @@ function airlineNameFromFlight(flight) {
       }
     });
 
-    // Radar markers (additive-only)
-    try { updateRadar(list); } catch (e) {}
-
     pruneRunwayLockCache(activeKeys);
     pruneBayEntryCache(activeKeys);
     pruneBaySideHistoryCache(activeKeys);
@@ -2814,6 +3059,95 @@ function airlineNameFromFlight(flight) {
     saveBayEntryCache();
     saveBaySideHistoryCache();
     saveGeometryAgreementCache();
+  }
+
+  // Departures card renderer -- separate from render() above (which stays the arrivals path,
+  // untouched). Reuses the same .card/.tagRow/.grid layout, but with a Departing tag instead of
+  // Arriving/Landing, no RWY chip (no runway prediction for departures yet), and the ETA grid
+  // slot swapped for "time since takeoff".
+  function renderDepartureCards(list) {
+    CURRENT_LIST = list.slice();
+    $cards.innerHTML = '';
+
+    if (!list.length) {
+      const empty = document.createElement('div');
+      empty.className = 'card';
+      empty.innerHTML = `
+        <div class="row">
+          <div>
+            <div class="flight" style="font-size: 26px;">No departures right now</div>
+            <div class="small">Try Refresh again in ~30 seconds.</div>
+          </div>
+          <div class="tag">${APT && APT.icao ? APT.icao : "—"}</div>
+        </div>
+      `;
+      $cards.appendChild(empty);
+      return;
+    }
+
+    list.forEach((it, idx) => {
+      const dnm = it._dist_nm;
+      const alt = ft(it.alt_baro ?? it.alt_geom);
+      const gs = kt(it.gs);
+      const vr = (typeof it.baro_rate === 'number') ? Math.round(it.baro_rate) : (typeof it.geom_rate === 'number' ? Math.round(it.geom_rate) : null);
+      const sinceMin = (typeof it._depSinceMs === 'number' && isFinite(it._depSinceMs)) ? Math.max(0, Math.round(it._depSinceMs / 60000)) : null;
+
+      const card = document.createElement('div');
+      card.className = 'card departure';
+
+      const heavy = isHeavyType(it.t);
+      // Same "always monotonic" reasoning as the arrivals confidence bar, just inverted: fuller
+      // as the aircraft approaches the 8NM cutoff instead of as it approaches the airport.
+      const progressPct = (typeof dnm === 'number' && isFinite(dnm))
+        ? Math.max(5, Math.min(98, Math.round(100 * (dnm / DEP_RULES.cutoffNM))))
+        : 15;
+      const confBar = `<div class="confidence"><i style="width:${progressPct}%"></i></div>`;
+
+      card.innerHTML = `
+        <div class="row">
+          <div class="rowMain">
+            <a class="acPhoto" target="_blank" rel="noopener">
+              <img class="acPhotoImg" alt="" />
+              <div class="acPhotoAttr"></div>
+            </a>
+            <div>
+              <div class="flight">${escapeHtml(pickLabel(it))}</div>
+              ${(()=>{ const f=(it.flight||"").trim(); const an=airlineNameFromFlight(f); const tp=aircraftTypePretty(it.t); return `<div class="airline">${escapeHtml(an)}</div>${tp ? `<div class="atype">${escapeHtml(tp)}</div>` : ""}`; })()}
+              ${it._route ? `<div class="small route">${escapeHtml(it._route.origin)} → ${escapeHtml(it._route.destination)}</div>` : ''}
+              <div class="small">${escapeHtml(pickSub(it))}</div>
+            </div>
+          </div>
+          <div class="cardBtns">
+            <button class="saveBtn" type="button" data-save-idx="${idx}" aria-label="Save shot">${ICONS.bookmark}</button>
+          </div>
+        </div>
+
+        <div class="tagRow"><div class="tag departing">${ICONS.landing}Departing</div>${heavy ? `<div class="tag tag-heavy">${ICONS.heavy}Heavy</div>` : ''}</div>
+        ${confBar}
+
+        <div class="grid">
+          <div class="chip">${ICONS.clock}<div class="v">${sinceMin != null ? sinceMin : '—'}</div><div class="k">Min since T/O</div></div>
+          <div class="chip">${ICONS.ruler}<div class="v">${(typeof dnm === 'number' && isFinite(dnm)) ? dnm.toFixed(1) : '—'}</div><div class="k">Dist nm</div></div>
+          <div class="chip">${ICONS.alt}<div class="v">${alt != null ? alt.toLocaleString() : '—'}</div><div class="k">Alt ft</div></div>
+          <div class="chip">${ICONS.gs}<div class="v">${gs != null ? gs.toLocaleString() : '—'}</div><div class="k">GS kt</div></div>
+          <div class="chip">${ICONS.vr}<div class="v">${vr != null ? vr.toLocaleString() : '—'}</div><div class="k">VR fpm</div></div>
+        </div>
+      `;
+
+      $cards.appendChild(card);
+      attachAircraftPhoto(card, it);
+
+      const sb = card.querySelector('button.saveBtn');
+      if (sb) {
+        sb.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const i = Number(sb.getAttribute('data-save-idx'));
+          const it2 = (Number.isFinite(i) && CURRENT_LIST[i]) ? CURRENT_LIST[i] : it;
+          saveShotFromAircraft(it2, 'departure');
+        });
+      }
+    });
   }
 
   function showSpotModal(runwayName, flightLabel, level) {
@@ -3120,19 +3454,43 @@ function airlineNameFromFlight(flight) {
           return ea - eb;
         })
         .slice(0, LIMITS.maxResults);
+      for (const p of filtered) p._kind = 'arrival';
 
-      await fetchRoutes(filtered).catch((e) => { console.error('Route lookup failed', e); });
-      for (const p of filtered) {
+      // Departures: independent pipeline (see classifyDepartures), computed every refresh
+      // regardless of which Cards mode is showing -- Radar always needs both, and a departure's
+      // ground->rotation transition must not be missed just because the user has Departures
+      // cards closed at that moment.
+      const departuresFiltered = classifyDepartures(ac).slice(0, LIMITS.maxResults);
+
+      await fetchRoutes([...filtered, ...departuresFiltered]).catch((e) => { console.error('Route lookup failed', e); });
+      for (const p of [...filtered, ...departuresFiltered]) {
         const cs = (p.flight || '').trim();
         const r = cs ? routeCache.get(cs) : null;
         p._route = (r && !r.miss) ? r : null;
       }
 
-      render(filtered);
+      CURRENT_ARRIVALS = filtered;
+      CURRENT_DEPARTURES = departuresFiltered;
+
+      if (LIST_MODE === 'departures') {
+        renderDepartureCards(departuresFiltered);
+      } else {
+        render(filtered);
+      }
+
+      // Departure cache bookkeeping runs every refresh (like the arrivals caches above),
+      // independent of which Cards mode is visible.
+      pruneDepartureTrackCache(new Set(departuresFiltered.map(p => getRunwayCacheKey(p)).filter(Boolean)));
+      saveDepartureTrackCache();
+
+      // Radar always shows the combined arrivals+departures set, filtered by RADAR_FILTER.
+      CURRENT_RADAR_LIST = [...filtered, ...departuresFiltered];
+      try { updateRadar(CURRENT_RADAR_LIST); } catch (e) {}
 
       const took = Math.round(Date.now() - started);
       $last.textContent = `${fmtTime(new Date())} (${took}ms)`;
-      setStatus('ok', `${filtered.length} shown`);
+      const shownCount = (LIST_MODE === 'departures') ? departuresFiltered.length : filtered.length;
+      setStatus('ok', `${shownCount} shown`);
       consecutiveFailures = 0;
       $refresh.disabled = false;
       refreshInProgress = false;
@@ -3420,15 +3778,17 @@ let savedShots = sanitizeSavedShots(loadSaved());
     });
   }
 
-  function saveShotFromAircraft(it) {
+  function saveShotFromAircraft(it, kind) {
     if (!it) return;
+    const isDeparture = kind === 'departure';
     const dnm = it._dist_nm;
     const alt = (typeof it.alt_baro === 'number') ? it.alt_baro : (typeof it.alt_geom === 'number' ? it.alt_geom : null);
     const gs = (typeof it.gs === 'number') ? it.gs : null;
-    const etaMin = (gs && gs > 0 && typeof dnm === 'number') ? Math.max(1, Math.round((dnm / gs) * 60)) : null;
+    // Departures have no runway prediction yet and "ETA" doesn't apply to an outbound flight.
+    const etaMin = (!isDeparture && gs && gs > 0 && typeof dnm === 'number') ? Math.max(1, Math.round((dnm / gs) * 60)) : null;
     const isLanding = (typeof dnm === 'number') && (dnm <= 5);
-    const status = isLanding ? 'Landing' : 'Arriving';
-    const runway = predictRunwayForAircraft(it);
+    const status = isDeparture ? 'Departing' : (isLanding ? 'Landing' : 'Arriving');
+    const runway = isDeparture ? null : predictRunwayForAircraft(it);
     const runwayName = (runway && runway.name) ? runway.name : "";
     const heavy = isHeavyType(it.t);
     const flight = (it.flight || '').trim().toUpperCase() || pickLabel(it);
@@ -3473,6 +3833,15 @@ let savedShots = sanitizeSavedShots(loadSaved());
   if ($viewRadarBtn) $viewRadarBtn.addEventListener('click', () => setViewMode('radar'));
   // Default view
   setViewMode('cards');
+
+  // Cards-view Arrivals/Departures toggle
+  if ($modeArrivalsBtn) $modeArrivalsBtn.addEventListener('click', () => setListMode('arrivals'));
+  if ($modeDeparturesBtn) $modeDeparturesBtn.addEventListener('click', () => setListMode('departures'));
+
+  // Radar-view-only Arrivals/Departures/Both filter
+  for (const btn of $radarFilterBtns) {
+    btn.addEventListener('click', () => setRadarFilter(btn.getAttribute('data-radar-filter')));
+  }
 
   $refresh.addEventListener('click', refresh);
 
