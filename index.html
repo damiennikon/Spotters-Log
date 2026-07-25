@@ -1835,6 +1835,12 @@ function updateAirportHeader() {
     YBBN: [['01L', '19R'], ['01R', '19L']],
   };
 
+  // Below this zoom level the two parallel-runway corridors sit close enough together (they're
+  // genuinely under 1NM apart at YBBN) that the dashed extensions and labels just add clutter
+  // without being distinguishable -- so strips/extensions/labels are skipped entirely until the
+  // map is zoomed in past this level. Purely a display threshold, not related to prediction logic.
+  const RUNWAY_VISUAL_MIN_ZOOM = 11;
+
   // How far past each threshold the dashed extended-centerline / approach-corridor line is
   // drawn on the radar map. Purely a display aid -- not used by any prediction logic. Long
   // enough to read as a real approach-corridor guide out toward inbound traffic, not just a
@@ -1920,6 +1926,7 @@ function updateAirportHeader() {
     }).addTo(radarMap);
 
     drawRunwayStrips();
+    radarMap.on('zoomend', drawRunwayStrips);
   }
 
   function drawRunwayStrips() {
@@ -1937,6 +1944,10 @@ function updateAirportHeader() {
       try { radarMap.removeControl(radarCenterlineLegend); } catch (e) {}
       radarCenterlineLegend = null;
     }
+
+    // Below the threshold the parallel corridors are too close together to read as separate
+    // lines -- leave them cleared rather than adding clutter at wide zoom.
+    if (radarMap.getZoom() < RUNWAY_VISUAL_MIN_ZOOM) return;
 
     const icao = (APT && APT.icao) ? String(APT.icao).toUpperCase() : '';
     const rwys = (RUNWAYS && RUNWAYS[icao]) || [];
