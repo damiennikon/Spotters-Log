@@ -2095,6 +2095,10 @@ function updateAirportHeader() {
         track.ts = now;
         p._dist_nm = dnm;
         p._depSinceMs = now - track.classifiedAt;
+        // Fixed origin moment (never recomputed/nudged after first detection, see below) -- the
+        // hero card's live "time since takeoff" ticker anchors directly to this instead of
+        // recomputing/comparing a rounded per-poll value the way the arrivals ETA countdown does.
+        p._depTakeoffTs = track.classifiedAt;
         p._kind = 'departure';
         out.push(p);
         continue;
@@ -2108,6 +2112,7 @@ function updateAirportHeader() {
           departureTrackCache.set(key, { ts: now, classifiedAt: now });
           p._dist_nm = dnm;
           p._depSinceMs = 0;
+          p._depTakeoffTs = now;
           p._kind = 'departure';
           out.push(p);
           continue;
@@ -3136,6 +3141,73 @@ function airlineNameFromFlight(flight) {
     heroTicker.intervalId = setInterval(tickHeroTicker, 1000);
   }
 
+  // ===== Departures hero card live "time since takeoff" (fixed-origin, separate from Arrivals) =====
+  // Unlike the arrivals ETA above (recomputed fresh from distance/speed every poll -- there's no
+  // true origin instant, only an estimate that happens to often round to the same minute), a
+  // departure's takeoff moment IS a real fixed event: departureTrackCache records classifiedAt
+  // once, at the exact ground->rotation transition (see classifyDepartures), and never touches it
+  // again for the life of that tracked departure. So this ticks up from
+  // Date.now() - originTs directly every second -- no rounding, no recompute-and-compare, nothing
+  // that could drift or reset on a poll landing. It only stops when the aircraft is no longer
+  // tracked as a departure at all (past DEP_RULES.cutoffNM, or the departures list is empty).
+  //
+  // Deliberately its own separate state/functions from heroTicker/updateHeroTicker above -- this
+  // must not share a baseline with (or be affected by changes to) the Arrivals countdown.
+  let depHeroTicker = null; // { intervalId, key, originTs, numEl, unitEl, gridEl }
+
+  function clearDepHeroTicker() {
+    if (depHeroTicker && depHeroTicker.intervalId) clearInterval(depHeroTicker.intervalId);
+    depHeroTicker = null;
+  }
+
+  function tickDepHeroTicker() {
+    if (!depHeroTicker) return;
+    const elapsedSeconds = Math.max(0, (Date.now() - depHeroTicker.originTs) / 1000);
+    depHeroTicker.numEl.textContent = fmtHeroCountdown(elapsedSeconds);
+    if (depHeroTicker.gridEl) {
+      // Whole minutes since takeoff, floored (matches "2 min since T/O" for the whole 2:00-2:59
+      // span) -- same reading the "Min since T/O" grid chip always showed, just kept live instead
+      // of frozen at whatever the poll that last rebuilt this card happened to compute.
+      depHeroTicker.gridEl.textContent = String(Math.floor(elapsedSeconds / 60));
+    }
+  }
+
+  // Called once per renderDepartureCards() cycle for the (possible) departures hero card. `card`
+  // is the hero's root element (queried fresh each time since $cards is rebuilt every poll); `key`
+  // identifies the aircraft (getRunwayCacheKey, same as departureTrackCache's own key); `originTs`
+  // is that aircraft's departureTrackCache.classifiedAt -- a fixed value for its whole tracked
+  // life, never recomputed per poll.
+  function updateDepHeroTicker(card, key, originTs) {
+    const numEl = card ? card.querySelector('.heroTimeNum') : null;
+    const unitEl = card ? card.querySelector('.heroTimeUnit') : null;
+    const gridEl = card ? card.querySelector('.heroTickGridVal') : null;
+
+    if (!numEl || !key || typeof originTs !== 'number' || !isFinite(originTs)) {
+      clearDepHeroTicker();
+      return;
+    }
+
+    if (depHeroTicker && depHeroTicker.key === key && depHeroTicker.originTs === originTs) {
+      // Same aircraft, same fixed takeoff origin -- nothing has genuinely changed, so leave the
+      // existing interval running untouched. Just repoint it at this render's fresh DOM nodes
+      // (the previous ones are detached the moment $cards.innerHTML is rebuilt) and paint
+      // immediately so there's no flash of a stale value.
+      depHeroTicker.numEl = numEl;
+      depHeroTicker.unitEl = unitEl;
+      depHeroTicker.gridEl = gridEl;
+      if (unitEl) unitEl.style.display = 'none';
+      tickDepHeroTicker();
+      return;
+    }
+
+    // New departures hero aircraft -- (re)anchor to its real takeoff-detection timestamp.
+    clearDepHeroTicker();
+    if (unitEl) unitEl.style.display = 'none'; // mm:ss is self-explanatory, drop the "min" suffix
+    depHeroTicker = { key, originTs, numEl, unitEl, gridEl, intervalId: null };
+    tickDepHeroTicker();
+    depHeroTicker.intervalId = setInterval(tickDepHeroTicker, 1000);
+  }
+
   const ICONS = {
     clock: `<svg width="12" height="12" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7" stroke="currentColor" stroke-width="1.5"/><path d="M10 6.5V10l2.5 1.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>`,
     landing: `<svg width="12" height="12" viewBox="0 0 20 20" fill="none"><path d="M3 15h14M6 15l3-9 2 2 5-3-1 5-4 2-2 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
@@ -3386,7 +3458,7 @@ function airlineNameFromFlight(flight) {
     $cards.innerHTML = '';
 
     if (!list.length) {
-      clearHeroTicker(); // no hero this cycle -- nothing left for it to tick
+      clearDepHeroTicker(); // no departures hero this cycle -- nothing left for it to tick
       const empty = document.createElement('div');
       empty.className = 'card';
       empty.innerHTML = `
@@ -3408,6 +3480,9 @@ function airlineNameFromFlight(flight) {
       const gs = kt(it.gs);
       const vr = (typeof it.baro_rate === 'number') ? Math.round(it.baro_rate) : (typeof it.geom_rate === 'number' ? Math.round(it.geom_rate) : null);
       const sinceMin = (typeof it._depSinceMs === 'number' && isFinite(it._depSinceMs)) ? Math.max(0, Math.round(it._depSinceMs / 60000)) : null;
+      // Fixed takeoff-detection origin (departureTrackCache.classifiedAt, see classifyDepartures)
+      // -- the hero ticker below anchors directly to this instead of the rounded sinceMin above.
+      const depTakeoffTs = (typeof it._depTakeoffTs === 'number' && isFinite(it._depTakeoffTs)) ? it._depTakeoffTs : null;
       const _rk = getRunwayCacheKey(it);
 
       const isHero = idx === 0;
@@ -3482,7 +3557,7 @@ function airlineNameFromFlight(flight) {
         heroWrap.appendChild(heroLabel);
         heroWrap.appendChild(card);
         $cards.appendChild(heroWrap);
-        updateHeroTicker(card, _rk, sinceMin, 'up');
+        updateDepHeroTicker(card, _rk, depTakeoffTs);
       } else {
         $cards.appendChild(card);
       }
