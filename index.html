@@ -2331,7 +2331,7 @@ else if (fn === '747.png') {
         hdg = bearingDeg(lat, lon, APT.lat, APT.lon);
       }
 
-      const label = (it.flight || it.r || it.t || it.hex || '—').toString().trim() || '—';
+      const label = (cleanFlight(it) || it.r || it.t || it.hex || '—').toString().trim() || '—';
 
       const typeCode = (it.t || it.type || it.icao_type || it.ac_type || it.aircraft_type || '').toString().trim();
       const icon = makeAircraftIcon(label, hdg, typeCode, it._kind);
@@ -2856,15 +2856,32 @@ function airlineNameFromFlight(flight) {
     return true;
   }
 
+  // ADS-B Mode S can hand back a padding/placeholder callsign (e.g. '@@@@@@@@') when the
+  // transponder field isn't fully populated or the decode is malformed. Reject those so
+  // display code falls back to reg/type/hex instead of showing garbage.
+  function isValidCallsign(s) {
+    const str = (s == null ? '' : String(s)).trim();
+    if (!str) return false;
+    if (/^@+$/.test(str)) return false;
+    if (/^([^A-Za-z0-9])\1*$/.test(str)) return false;
+    if (!/[A-Za-z0-9]/.test(str)) return false;
+    return true;
+  }
+
+  function cleanFlight(p) {
+    const raw = (p && p.flight) ? String(p.flight).trim() : '';
+    return isValidCallsign(raw) ? raw : '';
+  }
+
   function pickLabel(p) {
-    const flight = (p.flight || '').trim();
+    const flight = cleanFlight(p);
     const type = (p.t || '').trim();
     return flight || type || (p.hex ? p.hex.toUpperCase() : '—');
   }
 
   function pickSub(p) {
     const reg = (p.r || '').trim();
-    const flight = (p.flight || '').trim();
+    const flight = cleanFlight(p);
     const type = (p.t || '').trim();
 
     const left = reg ? reg : '—';
@@ -3009,7 +3026,7 @@ function airlineNameFromFlight(flight) {
             </a>
             <div>
               <div class="flight">${escapeHtml(pickLabel(it))}</div>
-              ${(()=>{ const f=(it.flight||"").trim(); const an=airlineNameFromFlight(f); const tp=aircraftTypePretty(it.t); return `<div class="airline">${escapeHtml(an)}</div>${tp ? `<div class="atype">${escapeHtml(tp)}</div>` : ""}`; })()}
+              ${(()=>{ const f=cleanFlight(it); const an=airlineNameFromFlight(f); const tp=aircraftTypePretty(it.t); return `<div class="airline">${escapeHtml(an)}</div>${tp ? `<div class="atype">${escapeHtml(tp)}</div>` : ""}`; })()}
               ${it._route ? `<div class="small route">${escapeHtml(it._route.origin)} → ${escapeHtml(it._route.destination)}</div>` : ''}
               <div class="small">${escapeHtml(pickSub(it))}</div>
             </div>
@@ -3118,7 +3135,7 @@ function airlineNameFromFlight(flight) {
             </a>
             <div>
               <div class="flight">${escapeHtml(pickLabel(it))}</div>
-              ${(()=>{ const f=(it.flight||"").trim(); const an=airlineNameFromFlight(f); const tp=aircraftTypePretty(it.t); return `<div class="airline">${escapeHtml(an)}</div>${tp ? `<div class="atype">${escapeHtml(tp)}</div>` : ""}`; })()}
+              ${(()=>{ const f=cleanFlight(it); const an=airlineNameFromFlight(f); const tp=aircraftTypePretty(it.t); return `<div class="airline">${escapeHtml(an)}</div>${tp ? `<div class="atype">${escapeHtml(tp)}</div>` : ""}`; })()}
               ${it._route ? `<div class="small route">${escapeHtml(it._route.origin)} → ${escapeHtml(it._route.destination)}</div>` : ''}
               <div class="small">${escapeHtml(pickSub(it))}</div>
             </div>
@@ -3797,7 +3814,7 @@ let savedShots = sanitizeSavedShots(loadSaved());
     const runway = isDeparture ? null : predictRunwayForAircraft(it);
     const runwayName = (runway && runway.name) ? runway.name : "";
     const heavy = isHeavyType(it.t);
-    const flight = (it.flight || '').trim().toUpperCase() || pickLabel(it);
+    const flight = cleanFlight(it).toUpperCase() || pickLabel(it);
 
     const shot = {
       savedAt: Date.now(),
