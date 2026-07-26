@@ -528,6 +528,7 @@
       </div>
       <div id="savedList" class="savedList"></div>
       <div class="modalFoot">
+        <button id="exportSavedBtn" class="btn ghost" type="button">Export for Photography Manager</button>
         <button id="clearSavedBtn" class="btn danger" type="button">Clear all</button>
       </div>
     </div>
@@ -2536,6 +2537,7 @@ if (firstRunNeedsWelcome()) {
   const $savedMeta = document.getElementById('savedMeta');
   const $closeSavedBtn = document.getElementById('closeSavedBtn');
   const $clearSavedBtn = document.getElementById('clearSavedBtn');
+  const $exportSavedBtn = document.getElementById('exportSavedBtn');
 
 
   // ===== Helpers =====
@@ -3903,6 +3905,42 @@ if ($closeSavedBtn) $closeSavedBtn.addEventListener('click', closeSavedModal);
   if ($spotModalClose) $spotModalClose.addEventListener('click', hideSpotModal);
   if ($spotModal) $spotModal.addEventListener('click', (e) => { if (e.target === $spotModal) hideSpotModal(); });
   if ($clearSavedBtn) $clearSavedBtn.addEventListener('click', () => { savedShots = []; persistSaved(savedShots); updateSavedBtn(); renderSavedList(); });
+
+  function pad2(n) { return String(n).padStart(2, '0'); }
+
+  function exportSavedShots() {
+    if (!Array.isArray(savedShots) || savedShots.length === 0) {
+      showToast('No saved shots to export');
+      return;
+    }
+    const records = savedShots.map(s => ({
+      savedAt: new Date(s.savedAt).toISOString(),
+      flight: s.flight,
+      reg: s.reg,
+      type: s.type,
+      heavy: s.heavy,
+      status: s.status,
+      distNm: s.distNm,
+      altFt: s.altFt,
+      gsKt: s.gsKt,
+      vrFpm: s.vrFpm,
+      etaMin: s.etaMin,
+      runway: s.runway
+    }));
+    const now = new Date();
+    const filename = `shotlog-export-${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}-${pad2(now.getHours())}${pad2(now.getMinutes())}.json`;
+    const blob = new Blob([JSON.stringify(records, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  if ($exportSavedBtn) $exportSavedBtn.addEventListener('click', exportSavedShots);
 
   // Auto-load once
   // Run after DOM is ready + a short delay to avoid mobile first-paint races.
