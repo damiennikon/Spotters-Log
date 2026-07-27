@@ -3931,7 +3931,8 @@ function updateSavedShotsFromLive(allAircraft){
       else s.minDistNm = Math.min(s.minDistNm, dnm);
     }
     const gs = (typeof live.gs === 'number') ? Math.round(live.gs) : null;
-    const alt = (typeof live.alt === 'number') ? Math.round(live.alt) : null;
+    const alt = (typeof live.alt_baro === 'number') ? Math.round(live.alt_baro)
+      : ((typeof live.alt_geom === 'number') ? Math.round(live.alt_geom) : null);
 
     // Keep latest values for later inference (e.g., if the feed drops right at touchdown)
     if (gs != null && isFinite(gs)) s.lastSeenGs = gs;
@@ -3950,7 +3951,8 @@ function updateSavedShotsFromLive(allAircraft){
     if(dnm != null) { s.dist = +(dnm.toFixed(1)); touched = true; }
     if(alt != null) { s.alt = alt; touched = true; }
     if(gs != null) { s.gs = gs; touched = true; }
-    if(typeof live.vr === 'number') { s.vr = Math.round(live.vr); touched = true; }
+    const vr = (typeof live.baro_rate === 'number') ? live.baro_rate : ((typeof live.geom_rate === 'number') ? live.geom_rate : null);
+    if(vr != null) { s.vr = Math.round(vr); touched = true; }
 
     // Prefer an immediate "Landed" once it hits the disappearance threshold.
     // Otherwise fall back to the existing conservative status logic.
