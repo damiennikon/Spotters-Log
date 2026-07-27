@@ -2206,6 +2206,10 @@ function updateAirportHeader() {
         track.ts = now;
         p._dist_nm = dnm;
         p._depSinceMs = now - track.classifiedAt;
+        // Real fixed origin (the takeoff-roll/rotation transition moment), surfaced for the
+        // departures hero ticker (updateDepHeroTicker) to anchor its live count-up to -- display
+        // only, doesn't affect classification.
+        p._depTakeoffTs = track.classifiedAt;
         p._kind = 'departure';
         out.push(p);
         continue;
@@ -2219,6 +2223,7 @@ function updateAirportHeader() {
           departureTrackCache.set(key, { ts: now, classifiedAt: now });
           p._dist_nm = dnm;
           p._depSinceMs = 0;
+          p._depTakeoffTs = now;
           p._kind = 'departure';
           out.push(p);
           continue;
@@ -3185,15 +3190,20 @@ function airlineNameFromFlight(flight) {
 
   // ===== Hero card live countdown (Pass 2) =====
   // Purely cosmetic client-side interpolation between real ~10s polls (AUTO_REFRESH_MS) -- the
-  // underlying etaMin/sinceMin value only actually changes when the next poll lands, same as
-  // always. This just ticks the hero card's displayed mm:ss once a second in between so it
-  // "feels alive". Single source of truth: render()/renderDepartureCards() run on every poll AND
-  // every LIST_MODE toggle, and both unconditionally clear this before (maybe) starting a fresh
-  // one for the new hero card -- so there is never more than one interval alive, it always reads
-  // the latest poll's value, and it can never outlive the DOM node it writes to (a different
-  // hero aircraft, an emptied list, or a Cards<->Radar switch all just flow through the same
-  // render call already gating this).
-  let heroTicker = null; // { intervalId }
+  // underlying etaMin value only actually changes when the next poll lands, same as always. This
+  // just ticks the hero card's displayed mm:ss once a second in between so it "feels alive".
+  //
+  // Arrivals-only (see the fully separate depHeroTicker below for departures' count-up, which is
+  // anchored to a real fixed takeoff timestamp instead of recomputed poll data). render() runs on
+  // every poll AND every LIST_MODE toggle and rebuilds $cards.innerHTML from scratch each time, so
+  // the hero card's DOM nodes are brand new every call even when the underlying hero aircraft and
+  // its etaMin haven't actually changed -- updateHeroTicker() below tells the two cases apart via
+  // `key` (getRunwayCacheKey) + baseMinutes: same key/same etaMin just repoints numEl/unitEl/gridEl
+  // at the fresh nodes and keeps ticking from the existing baseline/pollTs; a genuinely new value
+  // (or a different hero aircraft) resets the baseline. Without this check the countdown silently
+  // snaps back to the rounded poll value every ~10s instead of ticking smoothly -- invisible on a
+  // single render, only visible across several real auto-refreshes.
+  let heroTicker = null; // { key, direction, baseMinutes, baseSeconds, pollTs, numEl, unitEl, gridEl, intervalId }
 
   function clearHeroTicker() {
     if (heroTicker && heroTicker.intervalId) clearInterval(heroTicker.intervalId);
@@ -3207,25 +3217,96 @@ function airlineNameFromFlight(flight) {
     return `${m}:${String(r).padStart(2, '0')}`;
   }
 
-  // direction 'down': counts down from minutesValue to 0 (arrivals ETA). 'up': counts up from
-  // minutesValue (departures time-since-takeoff). numEl/unitEl are the .heroTimeNum/.heroTimeUnit
-  // nodes for THIS render's hero card specifically (re-queried fresh every render() call, since
-  // $cards.innerHTML is rebuilt from scratch every poll).
-  function startHeroTicker(numEl, unitEl, minutesValue, direction) {
-    clearHeroTicker();
-    if (!numEl || typeof minutesValue !== 'number' || !isFinite(minutesValue)) return;
+  function tickHeroTicker() {
+    if (!heroTicker) return;
+    const elapsed = (Date.now() - heroTicker.pollTs) / 1000;
+    const total = heroTicker.direction === 'up' ? heroTicker.baseSeconds + elapsed : heroTicker.baseSeconds - elapsed;
+    if (heroTicker.numEl) heroTicker.numEl.textContent = fmtHeroCountdown(total);
+    // Grid chip ("ETA min") rounds UP: at e.g. 2:49 remaining the ticking mm:ss and the whole-minute
+    // grid chip would otherwise disagree (grid showing "2" next to a displayed "2:49", which reads
+    // closer to 3) -- ceil keeps the two in visual agreement across the whole countdown.
+    if (heroTicker.gridEl) heroTicker.gridEl.textContent = String(Math.max(0, Math.ceil(total / 60)));
+  }
 
+  // direction 'down': counts down from minutesValue to 0 (arrivals ETA -- the only direction this
+  // ticker uses now; kept as an explicit field for clarity/symmetry with depHeroTicker). numEl/
+  // unitEl/gridEl are THIS render's fresh DOM nodes (.heroTimeNum/.heroTimeUnit/.heroTickGridVal),
+  // re-queried every render() call. `key` (getRunwayCacheKey) identifies the hero aircraft across
+  // polls so we can tell "still the same hero, same ETA, just re-rendered" apart from "genuinely
+  // new value" -- see the block comment above.
+  function updateHeroTicker(numEl, unitEl, gridEl, minutesValue, direction, key) {
+    if (!numEl || typeof minutesValue !== 'number' || !isFinite(minutesValue)) {
+      clearHeroTicker();
+      return;
+    }
+
+    const samePosition = !!heroTicker && !!key && heroTicker.key === key &&
+      heroTicker.direction === direction && heroTicker.baseMinutes === minutesValue;
+
+    if (samePosition) {
+      heroTicker.numEl = numEl;
+      heroTicker.unitEl = unitEl;
+      heroTicker.gridEl = gridEl;
+      if (unitEl) unitEl.style.display = 'none';
+      tickHeroTicker(); // paint immediately so there's no flash of a stale value on the fresh nodes
+      return;
+    }
+
+    clearHeroTicker();
     const baseSeconds = minutesValue * 60;
-    const pollTs = Date.now();
-    const tick = () => {
-      const elapsed = (Date.now() - pollTs) / 1000;
-      const total = direction === 'up' ? baseSeconds + elapsed : baseSeconds - elapsed;
-      numEl.textContent = fmtHeroCountdown(total);
-    };
+    heroTicker = { key, direction, baseMinutes: minutesValue, baseSeconds, pollTs: Date.now(), numEl, unitEl, gridEl, intervalId: null };
     if (unitEl) unitEl.style.display = 'none'; // mm:ss is self-explanatory, drop the "min" suffix
-    tick();
-    const intervalId = setInterval(tick, 1000);
-    heroTicker = { intervalId };
+    tickHeroTicker();
+    heroTicker.intervalId = setInterval(tickHeroTicker, 1000);
+  }
+
+  // ===== Departures hero live count-up (separate from heroTicker above) =====
+  // Unlike arrivals (etaMin recomputed fresh each poll from live distance/speed), a departure's
+  // takeoff moment is a real fixed event recorded once in departureTrackCache.classifiedAt (see
+  // classifyDepartures, which surfaces it as _depTakeoffTs -- read-only here, that function's
+  // classification logic is untouched). So instead of comparing against poll-computed minutes like
+  // heroTicker does, this just displays literal elapsed time since that fixed origin -- there's
+  // nothing to "recompute" or disagree with across polls, only the DOM nodes need repointing.
+  // Fully independent state from heroTicker: a different key/baseline, never cleared by arrivals
+  // rendering and vice versa.
+  let depHeroTicker = null; // { key, originTs, numEl, unitEl, gridEl, intervalId }
+
+  function clearDepHeroTicker() {
+    if (depHeroTicker && depHeroTicker.intervalId) clearInterval(depHeroTicker.intervalId);
+    depHeroTicker = null;
+  }
+
+  function tickDepHeroTicker() {
+    if (!depHeroTicker) return;
+    const elapsed = (Date.now() - depHeroTicker.originTs) / 1000;
+    if (depHeroTicker.numEl) depHeroTicker.numEl.textContent = fmtHeroCountdown(elapsed);
+    // Grid chip ("Min since T/O") rounds DOWN: matches "2 min since T/O" for the whole 2:00-2:59
+    // span, the departures-side equivalent of the arrivals ceil fix above.
+    if (depHeroTicker.gridEl) depHeroTicker.gridEl.textContent = String(Math.max(0, Math.floor(elapsed / 60)));
+  }
+
+  function updateDepHeroTicker(numEl, unitEl, gridEl, originTs, key) {
+    if (!numEl || typeof originTs !== 'number' || !isFinite(originTs)) {
+      clearDepHeroTicker();
+      return;
+    }
+
+    const samePosition = !!depHeroTicker && !!key && depHeroTicker.key === key && depHeroTicker.originTs === originTs;
+
+    if (samePosition) {
+      depHeroTicker.numEl = numEl;
+      depHeroTicker.unitEl = unitEl;
+      depHeroTicker.gridEl = gridEl;
+      if (unitEl) unitEl.style.display = 'none';
+      tickDepHeroTicker();
+      return;
+    }
+
+    clearDepHeroTicker();
+    depHeroTicker = { key, originTs, numEl, unitEl, gridEl, intervalId: null };
+    if (unitEl) unitEl.style.display = 'none';
+    tickDepHeroTicker();
+    depHeroTicker.intervalId = setInterval(tickDepHeroTicker, 1000);
   }
 
   const ICONS = {
@@ -3276,9 +3357,9 @@ function airlineNameFromFlight(flight) {
   function render(list) {
     CURRENT_LIST = list.slice();
     $cards.innerHTML = '';
-    clearHeroTicker();
 
     if (!list.length) {
+      clearHeroTicker(); // no hero this cycle
       const empty = document.createElement('div');
       empty.className = 'card';
       empty.innerHTML = `
@@ -3393,7 +3474,7 @@ function airlineNameFromFlight(flight) {
 
       const gridHtml = `
         <div class="grid">
-          <div class="chip">${ICONS.clock}<div class="v">${etaMin != null ? etaMin : '—'}</div><div class="k">ETA min</div></div>
+          <div class="chip">${ICONS.clock}<div class="v heroTickGridVal">${etaMin != null ? etaMin : '—'}</div><div class="k">ETA min</div></div>
           <div class="chip">${ICONS.ruler}<div class="v">${dnm.toFixed(1)}</div><div class="k">Dist nm</div></div>
           <div class="chip">${ICONS.alt}<div class="v">${alt != null ? alt.toLocaleString() : '—'}</div><div class="k">Alt ft</div></div>
           <div class="chip">${ICONS.gs}<div class="v">${gs != null ? gs.toLocaleString() : '—'}</div><div class="k">GS kt</div></div>
@@ -3431,7 +3512,7 @@ function airlineNameFromFlight(flight) {
         heroWrap.appendChild(heroLabel);
         heroWrap.appendChild(card);
         $cards.appendChild(heroWrap);
-        startHeroTicker(card.querySelector('.heroTimeNum'), card.querySelector('.heroTimeUnit'), etaMin, 'down');
+        updateHeroTicker(card.querySelector('.heroTimeNum'), card.querySelector('.heroTimeUnit'), card.querySelector('.heroTickGridVal'), etaMin, 'down', _rk);
       } else {
         $cards.appendChild(card);
       }
@@ -3476,9 +3557,9 @@ function airlineNameFromFlight(flight) {
   function renderDepartureCards(list) {
     CURRENT_LIST = list.slice();
     $cards.innerHTML = '';
-    clearHeroTicker();
 
     if (!list.length) {
+      clearDepHeroTicker(); // no hero this cycle
       const empty = document.createElement('div');
       empty.className = 'card';
       empty.innerHTML = `
@@ -3500,6 +3581,7 @@ function airlineNameFromFlight(flight) {
       const gs = kt(it.gs);
       const vr = (typeof it.baro_rate === 'number') ? Math.round(it.baro_rate) : (typeof it.geom_rate === 'number' ? Math.round(it.geom_rate) : null);
       const sinceMin = (typeof it._depSinceMs === 'number' && isFinite(it._depSinceMs)) ? Math.max(0, Math.round(it._depSinceMs / 60000)) : null;
+      const _dk = getRunwayCacheKey(it);
 
       const isHero = idx === 0;
 
@@ -3536,7 +3618,7 @@ function airlineNameFromFlight(flight) {
 
       const gridHtml = `
         <div class="grid">
-          <div class="chip">${ICONS.clock}<div class="v">${sinceMin != null ? sinceMin : '—'}</div><div class="k">Min since T/O</div></div>
+          <div class="chip">${ICONS.clock}<div class="v heroTickGridVal">${sinceMin != null ? sinceMin : '—'}</div><div class="k">Min since T/O</div></div>
           <div class="chip">${ICONS.ruler}<div class="v">${(typeof dnm === 'number' && isFinite(dnm)) ? dnm.toFixed(1) : '—'}</div><div class="k">Dist nm</div></div>
           <div class="chip">${ICONS.alt}<div class="v">${alt != null ? alt.toLocaleString() : '—'}</div><div class="k">Alt ft</div></div>
           <div class="chip">${ICONS.gs}<div class="v">${gs != null ? gs.toLocaleString() : '—'}</div><div class="k">GS kt</div></div>
@@ -3573,7 +3655,7 @@ function airlineNameFromFlight(flight) {
         heroWrap.appendChild(heroLabel);
         heroWrap.appendChild(card);
         $cards.appendChild(heroWrap);
-        startHeroTicker(card.querySelector('.heroTimeNum'), card.querySelector('.heroTimeUnit'), sinceMin, 'up');
+        updateDepHeroTicker(card.querySelector('.heroTimeNum'), card.querySelector('.heroTimeUnit'), card.querySelector('.heroTickGridVal'), it._depTakeoffTs, _dk);
       } else {
         $cards.appendChild(card);
       }
