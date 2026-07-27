@@ -326,6 +326,31 @@
   .k{ font-size:9px; color:var(--text-3); letter-spacing:0.08em; font-weight:600; text-transform:uppercase; }
   .v{ font-size:14px; font-weight:600; color:var(--text); margin-top:4px; line-height:1; }
 
+  /* Hero-card "best spotting position" inline summary (Pass 4) -- only rendered once the RWY
+     chip's gated `rwy` value has locked in (see render()), so it never duplicates the "Check map
+     to confirm runway" hedge with a second uncertain element. Deliberately reuses the .k/.v
+     typography from the stats grid above so it reads as one more row of that grid rather than a
+     bolted-on separate block; the top border matches .grid's own separator. A real <button> (not
+     a div) since tapping it opens the same spotModal the eye-icon button does.
+
+     A Pass 5 attempt at an early/pre-lock variant (fed rawRwy, labeled "Early estimate") was
+     reverted for the same reason as the RWY chip's early guess above: live testing showed it
+     could contradict the map. Pre-lock, this summary shows nothing again, exactly as it did here.
+  */
+  .heroSpot{
+    appearance:none; display:flex; width:100%; margin-top:0; padding:10px 4px 0;
+    border:0; border-top:1px solid var(--border); border-radius:0;
+    background:transparent; font-family:inherit; cursor:pointer; text-align:center;
+    transition:background .15s ease;
+  }
+  .heroSpot:hover{ background:var(--surface-2); }
+  .heroSpot:active{ transform:translateY(1px); }
+  .heroSpotItem{ flex:1 1 0; padding-bottom:10px; }
+  .heroSpotItem + .heroSpotItem{ border-left:1px solid var(--border); }
+  /* Ideal spot for this runway exists but is currently closed/temporary -- same honesty the
+     spot-popup already shows, just surfaced here too (see bestSpotsForRunway's missingPrimary). */
+  .heroSpot.heroSpot-missing .v{ color:var(--warn); }
+
   .cardBtns{ display:flex; gap:6px; flex:0 0 auto; }
 
   .saveBtn, .spotBtn{
@@ -925,7 +950,7 @@ const SPOTS_YBBN = [
   {
     name: "Acacia Loop",
     lat: -27.376755, lon: 153.127653,
-    runways: ["19L", "19R", "01R"],
+    runways: ["19L", "01R"],
     style: "both",
     lens: "120-400mm",
     notes: "19L touchdowns + 01R departures, both over the bay. If it's 19R instead, this is more of a taxi/crossing shot than a touchdown.",
@@ -3346,6 +3371,12 @@ function airlineNameFromFlight(flight) {
   // value locks in at <=2NM, the chip never names a side (parallel thresholds are under 1NM
   // apart and in-memory lock/bay-entry state resets on every reload, so an early guess can flip
   // sides with no visual difference) -- it just points at the map's runway strips instead.
+  //
+  // A Pass 5 attempt at showing rawRwy here as an early "Likely X" hint (hero card only) was
+  // reverted: live testing showed the raw bay-side estimate can actively contradict what's
+  // visible on the radar map -- the exact reason it was never trusted enough to lock into
+  // runwayLockCache in the first place. Confident-looking text next to a map showing the
+  // opposite corridor undermines trust more than showing nothing.
   function runwayChipHtml(rwy, rwyLevel, rawRwy, rawRwyLevel, icon, dnm) {
     if (rwy) {
       const cls = rwyLevel === 'high' ? 'tag-runway-high' : 'tag-runway-likely';
@@ -3487,6 +3518,33 @@ function airlineNameFromFlight(flight) {
           <div class="heroTimeValue"><span class="heroTimeNum">${etaMin != null ? etaMin : '—'}</span><span class="heroTimeUnit">min</span></div>
         </div>` : '';
 
+      // Best-spotting-position summary, inline on the hero card (Pass 4) -- only once `rwy`
+      // (the same gated value driving the RWY chip/confidence chip above) has actually locked
+      // in; before that, showing nothing here avoids a second uncertain element sitting next to
+      // the chip's own "Check map to confirm runway" hedge. Reuses bestSpotsForRunway (the same
+      // matching logic showSpotModal already uses) rather than any new prediction call.
+      let heroSpotHtml = '';
+      if (isHero && rwy) {
+        const icaoForSpots = (APT && APT.icao) ? String(APT.icao).toUpperCase() : '';
+        const { matches, missingPrimary } = bestSpotsForRunway(icaoForSpots, rwy);
+        if (matches.length) {
+          const best = matches[0];
+          heroSpotHtml = `
+        <button type="button" class="heroSpot" data-rwy="${rawRwy || ''}" data-level="${rawRwyLevel || ''}" data-flight="${escapeHtml(pickLabel(it))}" aria-label="Best spotting position">
+          <div class="heroSpotItem"><div class="k">Best Spot</div><div class="v">${escapeHtml(best.name)}</div></div>
+          <div class="heroSpotItem"><div class="k">Lens</div><div class="v">${escapeHtml(best.lens)}</div></div>
+        </button>`;
+        } else if (missingPrimary) {
+          // Same honesty showSpotModal already surfaces when the ideal spot for this runway is
+          // currently closed/temporary -- no Lens column since that spot isn't actually usable.
+          heroSpotHtml = `
+        <button type="button" class="heroSpot heroSpot-missing" data-rwy="${rawRwy || ''}" data-level="${rawRwyLevel || ''}" data-flight="${escapeHtml(pickLabel(it))}" aria-label="Best spotting position">
+          <div class="heroSpotItem"><div class="k">Best Spot</div><div class="v">${escapeHtml(missingPrimary.name)} (${escapeHtml(missingPrimary.status)})</div></div>
+        </button>`;
+        }
+        // Else: no mapped spot for this runway at all -- show nothing, no empty placeholder.
+      }
+
       card.innerHTML = `
         <div class="row">
           <div class="rowMain">${rowMainHtml}
@@ -3501,6 +3559,7 @@ function airlineNameFromFlight(flight) {
         ${heroTimeHtml}
         ${confBar}
         ${gridHtml}
+        ${heroSpotHtml}
       `;
 
       if (isHero) {
@@ -3525,6 +3584,17 @@ function airlineNameFromFlight(flight) {
           e.preventDefault();
           e.stopPropagation();
           showSpotModal(spotBtn.getAttribute('data-rwy') || '', spotBtn.getAttribute('data-flight') || '', spotBtn.getAttribute('data-level') || '');
+        });
+      }
+
+      // Same interaction as the eye-icon spotBtn above -- tapping the inline hero summary opens
+      // the identical spotModal with the identical arguments, not a second interaction pattern.
+      const heroSpotBtn = card.querySelector('button.heroSpot');
+      if (heroSpotBtn) {
+        heroSpotBtn.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          showSpotModal(heroSpotBtn.getAttribute('data-rwy') || '', heroSpotBtn.getAttribute('data-flight') || '', heroSpotBtn.getAttribute('data-level') || '');
         });
       }
 
