@@ -2280,7 +2280,10 @@ function updateAirportHeader() {
   // genuinely under 1NM apart at YBBN) that the dashed extensions and labels just add clutter
   // without being distinguishable -- so strips/extensions/labels are skipped entirely until the
   // map is zoomed in past this level. Purely a display threshold, not related to prediction logic.
-  const RUNWAY_VISUAL_MIN_ZOOM = 11;
+  // Lowered from 11 (Pass 3): full-screen Radar has much more physical screen space than the old
+  // constrained-height map, so the two corridors read as visually separate at one zoom level
+  // lower than before, even at the same real-world distance apart.
+  const RUNWAY_VISUAL_MIN_ZOOM = 10;
 
   // How far past each threshold the dashed extended-centerline / approach-corridor line is
   // drawn on the radar map. Purely a display aid -- not used by any prediction logic. Long
