@@ -326,26 +326,38 @@
   .k{ font-size:9px; color:var(--text-3); letter-spacing:0.08em; font-weight:600; text-transform:uppercase; }
   .v{ font-size:14px; font-weight:600; color:var(--text); margin-top:4px; line-height:1; }
 
-  /* Hero-card "best spotting position" inline summary (Pass 4) -- only rendered once the RWY
-     chip's gated `rwy` value has locked in (see render()), so it never duplicates the "Check map
-     to confirm runway" hedge with a second uncertain element. Deliberately reuses the .k/.v
+  /* Hero-card "best spotting position" inline summary (Pass 4, extended Pass 5) -- rendered
+     once the RWY chip's gated `rwy` value has locked in (see render()), reusing the .k/.v
      typography from the stats grid above so it reads as one more row of that grid rather than a
      bolted-on separate block; the top border matches .grid's own separator. A real <button> (not
-     a div) since tapping it opens the same spotModal the eye-icon button does.
+     a div) since tapping it opens the same spotModal the eye-icon button does. Column layout
+     (.heroSpotRow nested inside) so the early-estimate variant below can add its label row
+     without changing the locked variant's markup shape.
   */
   .heroSpot{
-    appearance:none; display:flex; width:100%; margin-top:0; padding:10px 4px 0;
+    appearance:none; display:flex; flex-direction:column; width:100%; margin-top:0; padding:10px 4px 0;
     border:0; border-top:1px solid var(--border); border-radius:0;
     background:transparent; font-family:inherit; cursor:pointer; text-align:center;
     transition:background .15s ease;
   }
   .heroSpot:hover{ background:var(--surface-2); }
   .heroSpot:active{ transform:translateY(1px); }
+  .heroSpotRow{ display:flex; width:100%; }
   .heroSpotItem{ flex:1 1 0; padding-bottom:10px; }
   .heroSpotItem + .heroSpotItem{ border-left:1px solid var(--border); }
   /* Ideal spot for this runway exists but is currently closed/temporary -- same honesty the
      spot-popup already shows, just surfaced here too (see bestSpotsForRunway's missingPrimary). */
   .heroSpot.heroSpot-missing .v{ color:var(--warn); }
+
+  /* Early-estimate variant (Pass 5, Part 2) -- shown from rawRwy before the gated `rwy` locks.
+     Dashed top border reuses the same "not confirmed yet" convention as .spotEmpty's dashed
+     border below, and the small muted label matches Part 1's .tag-runway-estimate treatment, so
+     this never reads with the same confidence as the locked heroSpot above. */
+  .heroSpot.heroSpot-early{ border-top-style:dashed; padding-top:8px; }
+  .heroSpotEarlyLabel{
+    font-size:9px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase;
+    color:var(--text-3); margin-bottom:6px;
+  }
 
   .cardBtns{ display:flex; gap:6px; flex:0 0 auto; }
 
@@ -946,7 +958,7 @@ const SPOTS_YBBN = [
   {
     name: "Acacia Loop",
     lat: -27.376755, lon: 153.127653,
-    runways: ["19L", "19R", "01R"],
+    runways: ["19L", "01R"],
     style: "both",
     lens: "120-400mm",
     notes: "19L touchdowns + 01R departures, both over the bay. If it's 19R instead, this is more of a taxi/crossing shot than a touchdown.",
@@ -3363,14 +3375,21 @@ function airlineNameFromFlight(flight) {
 
   // Picks the RWY chip's markup. `rwy`/`rwyLevel` are the gated (<=2NM, locked/confirmed) values;
   // `rawRwy`/`rawRwyLevel` (the ungated values the spotting popup uses) and `dnm` are accepted
-  // for signature compatibility with that popup but intentionally unused here: until the gated
-  // value locks in at <=2NM, the chip never names a side (parallel thresholds are under 1NM
-  // apart and in-memory lock/bay-entry state resets on every reload, so an early guess can flip
-  // sides with no visual difference) -- it just points at the map's runway strips instead.
-  function runwayChipHtml(rwy, rwyLevel, rawRwy, rawRwyLevel, icon, dnm) {
+  // for signature compatibility with that popup. Compact list cards (isHero falsy) keep the
+  // original behavior exactly: until the gated value locks in at <=2NM, the chip never names a
+  // side (parallel thresholds are under 1NM apart and in-memory lock/bay-entry state resets on
+  // every reload, so an early guess can flip sides with no visual difference) -- it just points
+  // at the map's runway strips instead. The HERO card only (Pass 5, Part 1) surfaces rawRwy as an
+  // explicitly-labeled "Likely" early estimate instead, still in the same muted
+  // .tag-runway-estimate treatment (never the confirmed/locked colors) so it reads as a hint, not
+  // a call.
+  function runwayChipHtml(rwy, rwyLevel, rawRwy, rawRwyLevel, icon, dnm, isHero) {
     if (rwy) {
       const cls = rwyLevel === 'high' ? 'tag-runway-high' : 'tag-runway-likely';
       return `<div class="tag tag-runway ${cls}">${icon}RWY ${rwy}</div>`;
+    }
+    if (isHero && rawRwy) {
+      return `<div class="tag tag-runway tag-runway-estimate">${icon}Likely ${rawRwy}</div>`;
     }
     return `<div class="tag tag-runway tag-runway-estimate">${icon}Check map to confirm runway</div>`;
   }
@@ -3491,7 +3510,7 @@ function airlineNameFromFlight(flight) {
               <div class="small">${escapeHtml(pickSub(it))}</div>
             </div>`;
 
-      const tagRowHtml = `<div class="tagRow"><div class="${tagClass}">${statusIcon}${statusText}</div>${confidenceChipHtml(rwyLevel)}${runwayChipHtml(rwy, rwyLevel, rawRwy, rawRwyLevel, ICONS.runway, dnm)}${heavy ? `<div class="tag tag-heavy">${ICONS.heavy}Heavy</div>` : ''}</div>`;
+      const tagRowHtml = `<div class="tagRow"><div class="${tagClass}">${statusIcon}${statusText}</div>${confidenceChipHtml(rwyLevel)}${runwayChipHtml(rwy, rwyLevel, rawRwy, rawRwyLevel, ICONS.runway, dnm, isHero)}${heavy ? `<div class="tag tag-heavy">${ICONS.heavy}Heavy</div>` : ''}</div>`;
 
       const gridHtml = `
         <div class="grid">
@@ -3508,31 +3527,63 @@ function airlineNameFromFlight(flight) {
           <div class="heroTimeValue"><span class="heroTimeNum">${etaMin != null ? etaMin : '—'}</span><span class="heroTimeUnit">min</span></div>
         </div>` : '';
 
-      // Best-spotting-position summary, inline on the hero card (Pass 4) -- only once `rwy`
-      // (the same gated value driving the RWY chip/confidence chip above) has actually locked
-      // in; before that, showing nothing here avoids a second uncertain element sitting next to
-      // the chip's own "Check map to confirm runway" hedge. Reuses bestSpotsForRunway (the same
-      // matching logic showSpotModal already uses) rather than any new prediction call.
+      // Best-spotting-position summary, inline on the hero card (Pass 4, extended Pass 5 Part 2)
+      // -- the LOCKED/confirmed variant once `rwy` (the same gated value driving the RWY chip/
+      // confidence chip above) has actually locked in; before that, the EARLY-ESTIMATE variant
+      // uses rawRwy instead (same value the RWY chip's Part-1 "Likely" text and the spot-popup
+      // already use), clearly marked so it never reads with the locked variant's confidence.
+      // Both call the same bestSpotsForRunway (the matching logic showSpotModal already uses)
+      // rather than any new prediction call -- only which runway value is fed in differs.
       let heroSpotHtml = '';
-      if (isHero && rwy) {
+      if (isHero) {
         const icaoForSpots = (APT && APT.icao) ? String(APT.icao).toUpperCase() : '';
-        const { matches, missingPrimary } = bestSpotsForRunway(icaoForSpots, rwy);
-        if (matches.length) {
-          const best = matches[0];
-          heroSpotHtml = `
+        if (rwy) {
+          const { matches, missingPrimary } = bestSpotsForRunway(icaoForSpots, rwy);
+          if (matches.length) {
+            const best = matches[0];
+            heroSpotHtml = `
         <button type="button" class="heroSpot" data-rwy="${rawRwy || ''}" data-level="${rawRwyLevel || ''}" data-flight="${escapeHtml(pickLabel(it))}" aria-label="Best spotting position">
-          <div class="heroSpotItem"><div class="k">Best Spot</div><div class="v">${escapeHtml(best.name)}</div></div>
-          <div class="heroSpotItem"><div class="k">Lens</div><div class="v">${escapeHtml(best.lens)}</div></div>
+          <div class="heroSpotRow">
+            <div class="heroSpotItem"><div class="k">Best Spot</div><div class="v">${escapeHtml(best.name)}</div></div>
+            <div class="heroSpotItem"><div class="k">Lens</div><div class="v">${escapeHtml(best.lens)}</div></div>
+          </div>
         </button>`;
-        } else if (missingPrimary) {
-          // Same honesty showSpotModal already surfaces when the ideal spot for this runway is
-          // currently closed/temporary -- no Lens column since that spot isn't actually usable.
-          heroSpotHtml = `
+          } else if (missingPrimary) {
+            // Same honesty showSpotModal already surfaces when the ideal spot for this runway is
+            // currently closed/temporary -- no Lens column since that spot isn't actually usable.
+            heroSpotHtml = `
         <button type="button" class="heroSpot heroSpot-missing" data-rwy="${rawRwy || ''}" data-level="${rawRwyLevel || ''}" data-flight="${escapeHtml(pickLabel(it))}" aria-label="Best spotting position">
-          <div class="heroSpotItem"><div class="k">Best Spot</div><div class="v">${escapeHtml(missingPrimary.name)} (${escapeHtml(missingPrimary.status)})</div></div>
+          <div class="heroSpotRow">
+            <div class="heroSpotItem"><div class="k">Best Spot</div><div class="v">${escapeHtml(missingPrimary.name)} (${escapeHtml(missingPrimary.status)})</div></div>
+          </div>
         </button>`;
+          }
+          // Else: no mapped spot for this runway at all -- show nothing, no empty placeholder.
+        } else if (rawRwy) {
+          // Pre-lock: same bestSpotsForRunway call, fed the raw/early estimate instead. Tapping
+          // still opens the identical spotModal, which already hedges non-'high' levels itself
+          // (estimateNote) -- no separate messaging invented here.
+          const { matches, missingPrimary } = bestSpotsForRunway(icaoForSpots, rawRwy);
+          if (matches.length) {
+            const best = matches[0];
+            heroSpotHtml = `
+        <button type="button" class="heroSpot heroSpot-early" data-rwy="${rawRwy || ''}" data-level="${rawRwyLevel || ''}" data-flight="${escapeHtml(pickLabel(it))}" aria-label="Best spotting position (early estimate)">
+          <div class="heroSpotEarlyLabel">Early estimate</div>
+          <div class="heroSpotRow">
+            <div class="heroSpotItem"><div class="k">Best Spot</div><div class="v">${escapeHtml(best.name)}</div></div>
+            <div class="heroSpotItem"><div class="k">Lens</div><div class="v">${escapeHtml(best.lens)}</div></div>
+          </div>
+        </button>`;
+          } else if (missingPrimary) {
+            heroSpotHtml = `
+        <button type="button" class="heroSpot heroSpot-early heroSpot-missing" data-rwy="${rawRwy || ''}" data-level="${rawRwyLevel || ''}" data-flight="${escapeHtml(pickLabel(it))}" aria-label="Best spotting position (early estimate)">
+          <div class="heroSpotEarlyLabel">Early estimate</div>
+          <div class="heroSpotRow">
+            <div class="heroSpotItem"><div class="k">Best Spot</div><div class="v">${escapeHtml(missingPrimary.name)} (${escapeHtml(missingPrimary.status)})</div></div>
+          </div>
+        </button>`;
+          }
         }
-        // Else: no mapped spot for this runway at all -- show nothing, no empty placeholder.
       }
 
       card.innerHTML = `
