@@ -554,14 +554,18 @@
   }
   /* Info/help button replaces the old permanently-visible .radarHint paragraph -- floats over the
      full-screen map (bottom-left, clear of Leaflet's own top-left zoom control and bottom-right
-     attribution) and reveals the same text in a tap-to-open popover instead of occupying space. */
+     attribution) and reveals the same text in a tap-to-open popover instead of occupying space.
+     Stacked directly ABOVE .centerlineLegend (also bottom-left, added by drawRunwayStrips() as a
+     Leaflet 'bottomleft' control) rather than sharing its footprint -- bottom offset is tuned to
+     clear the legend's fixed 2-row height (YBBN's only pair set) plus Leaflet's own 10px control
+     margin, with a small gap on top of that. */
   .radarHintBtn{
-    position:absolute; left:12px; bottom:12px; z-index:10;
+    position:absolute; left:12px; bottom:78px; z-index:10;
     width:36px; height:36px; border-radius:50%; padding:0;
     display:grid; place-items:center; color:var(--text-2); cursor:pointer;
   }
   .radarHintPopover{
-    position:absolute; left:12px; bottom:58px; z-index:11;
+    position:absolute; left:12px; bottom:124px; z-index:11;
     max-width:min(280px, calc(100vw - 24px));
     padding:10px 12px; border-radius:var(--r-md);
     color:var(--text-3); font-size:12px; line-height:1.5;
@@ -569,6 +573,27 @@
   }
   .radarHintPopover b{ color:var(--accent); font-weight:700; }
   .radarHintPopover.show{ display:block; }
+  /* Wind direction indicator (METAR-sourced, top-right) -- purely informational, same visual
+     treatment as the other radar overlays (glass, absolute over the map). .radarFilterRow.overlay
+     (above) is `left:12;right:12` -- an absolutely-positioned flex container with no explicit
+     width auto-stretches to fill that whole span, so its glass pill actually reaches the full top
+     edge even though its buttons only occupy the left part of it. Placed below that pill's bottom
+     edge (measured height ~44px) rather than at top:12, so it doesn't render on top of/inside it;
+     still visually top-right and clear of the bottom-left hint/legend stack. Hidden by default;
+     JS toggles `.show` only once a real METAR wind reading is available, so a failed/unavailable
+     fetch never leaves a broken icon on screen. */
+  .windSock{
+    position:absolute; top:68px; right:12px; z-index:10;
+    display:none; align-items:center; gap:6px;
+    padding:6px 10px; border-radius:999px;
+    color:var(--text-2);
+  }
+  .windSock.show{ display:flex; }
+  .windSockArrow{ width:18px; height:18px; flex:none; color:var(--accent); transition:transform 0.4s ease; }
+  .windSockLabel{
+    font-family:'IBM Plex Mono',monospace; font-size:11px; font-weight:600;
+    letter-spacing:0.02em; color:var(--text); white-space:nowrap;
+  }
   .acPlane{ width:18px; height:18px; transform-origin:50% 50%; filter:drop-shadow(0 2px 3px rgba(0,0,0,0.45)); opacity:0.95; color:var(--accent); }
   .acLabel{
     margin-top:2px; padding:2px 7px; border-radius:999px;
@@ -700,6 +725,12 @@
           <svg width="18" height="18" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7.5" stroke="currentColor" stroke-width="1.5"/><path d="M10 9v4.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="10" cy="6.6" r="0.9" fill="currentColor"/></svg>
         </button>
         <div id="radarHintPopover" class="radarHintPopover glass" role="tooltip">Arrivals (white) and departures (violet) plotted top-down. Ring = 30 NM. Tap a marker for details. <b>Zoom in near the airport to see runway guides.</b></div>
+        <div id="windSock" class="windSock glass" role="img">
+          <svg id="windSockArrow" class="windSockArrow" width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <path d="M10 17V3M10 3L6.2 7.8M10 3L13.8 7.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span id="windSockLabel" class="windSockLabel">--kt</span>
+        </div>
       </div>
   </div>
 
@@ -2273,6 +2304,9 @@ function updateAirportHeader() {
   const $navRadarBtn = document.getElementById('navRadarBtn');
   const $navSettingsBtn = document.getElementById('navSettingsBtn');
   const $modeArrivalsBtn = document.getElementById('modeArrivalsBtn');
+  const $windSock = document.getElementById('windSock');
+  const $windSockArrow = document.getElementById('windSockArrow');
+  const $windSockLabel = document.getElementById('windSockLabel');
   const $modeDeparturesBtn = document.getElementById('modeDeparturesBtn');
   const $radarFilterBtns = Array.from(document.querySelectorAll('#radarFilterRow [data-radar-filter]'));
 
@@ -2345,6 +2379,119 @@ function updateAirportHeader() {
     }).join('');
   }
 
+  // ===== Wind direction indicator (METAR, top-right overlay on the Radar view) =====
+  // Purely a visual aid, same philosophy as the dashed runway-corridor lines above -- this NEVER
+  // feeds into predictRunwayForAircraft() or any other prediction logic, even though wind
+  // direction correlates with active runway in real life. Only ever reads METAR; never writes
+  // into any of the runway-prediction state.
+  //
+  // METAR reports update roughly hourly in real life, so this is polled far less often than the
+  // ADS-B feed (AUTO_REFRESH_MS, ~10s) -- and only while the Radar tab is actually the active tab,
+  // same lifecycle as the radar map itself (see setTabMode below).
+  const METAR_REFRESH_MS = 10 * 60 * 1000; // 10 min
+  const METAR_PROXY = './metar.php';
+  let metarTimer = null;
+  let metarInFlight = false;
+
+  // Extracts wind direction/speed from a raw METAR string's wind group, e.g. "24012KT",
+  // "01015G25KT", "VRB03KT". VRB (variable, light/no prevailing direction) has no single bearing
+  // to point a sock at, so it's treated the same as "no data" -- nothing renders rather than
+  // showing a misleadingly confident arrow.
+  function parseMetarWind(raw) {
+    if (typeof raw !== 'string') return null;
+    const m = raw.match(/\b(\d{3}|VRB)(\d{2,3})(?:G\d{2,3})?KT\b/);
+    if (!m || m[1] === 'VRB') return null;
+    const dir = parseInt(m[1], 10);
+    const speed = parseInt(m[2], 10);
+    if (!isFinite(dir) || !isFinite(speed)) return null;
+    return { dir, speed };
+  }
+
+  function extractMetarRaw(json) {
+    const entry = Array.isArray(json) ? json[0] : null;
+    if (!entry) return null;
+    return (typeof entry.rawOb === 'string' && entry.rawOb) ||
+      (typeof entry.raw_text === 'string' && entry.raw_text) || null;
+  }
+
+  // Direct browser fetch first (aviationweather.gov's public data API needs no key) -- falls back
+  // to metar.php only if that's blocked (e.g. no CORS headers on the upstream response).
+  async function fetchMetarWindDirect(icao) {
+    const url = `https://aviationweather.gov/api/data/metar?ids=${encodeURIComponent(icao)}&format=json`;
+    const resp = await fetch(url, { cache: 'no-store' });
+    if (!resp.ok) throw new Error(`METAR HTTP ${resp.status}`);
+    return parseMetarWind(extractMetarRaw(await resp.json()));
+  }
+
+  async function fetchMetarWindProxied(icao) {
+    const url = new URL(METAR_PROXY, location.href);
+    url.searchParams.set('ids', icao);
+    url.searchParams.set('_', String(Date.now()));
+    const resp = await fetch(url.toString(), { cache: 'no-store' });
+    if (!resp.ok) throw new Error(`METAR proxy HTTP ${resp.status}`);
+    return parseMetarWind(extractMetarRaw(await resp.json()));
+  }
+
+  async function fetchMetarWind(icao) {
+    try {
+      return await fetchMetarWindDirect(icao);
+    } catch (e) {
+      try {
+        return await fetchMetarWindProxied(icao);
+      } catch (e2) {
+        return null;
+      }
+    }
+  }
+
+  // Real airport windsock convention: the sock points in the direction the wind is blowing
+  // TOWARD (its open end faces away from the wind source), not the direction it's blowing FROM.
+  // METAR wind direction is always reported as the FROM bearing, so the icon is rotated to
+  // (dir + 180). The arrow art itself is drawn pointing up/north at rest, matching the same
+  // compass-degrees-as-CSS-rotation convention makeAircraftIcon() uses for aircraft headings.
+  function renderWindSock(wind) {
+    if (!$windSock) return;
+    if (!wind) {
+      $windSock.classList.remove('show');
+      return;
+    }
+    const towardDeg = (wind.dir + 180) % 360;
+    if ($windSockArrow) $windSockArrow.style.transform = `rotate(${towardDeg}deg)`;
+    if ($windSockLabel) $windSockLabel.textContent = `${wind.speed}kt`;
+    $windSock.setAttribute(
+      'aria-label',
+      `Wind from ${wind.dir}° at ${wind.speed} knots. Arrow points the direction the wind is blowing toward, like a windsock.`
+    );
+    $windSock.title = $windSock.getAttribute('aria-label');
+    $windSock.classList.add('show');
+  }
+
+  async function pollMetarWind() {
+    if (TAB_MODE !== 'radar' || metarInFlight) return;
+    const icao = (APT && APT.icao) ? String(APT.icao).toUpperCase() : '';
+    if (!icao) { renderWindSock(null); return; }
+    metarInFlight = true;
+    let wind = null;
+    try {
+      wind = await fetchMetarWind(icao);
+    } finally {
+      metarInFlight = false;
+    }
+    if (TAB_MODE !== 'radar') return; // tab may have changed while the fetch was in flight
+    renderWindSock(wind);
+  }
+
+  function startMetarPolling() {
+    stopMetarPolling();
+    pollMetarWind();
+    metarTimer = setInterval(pollMetarWind, METAR_REFRESH_MS);
+  }
+
+  function stopMetarPolling() {
+    if (metarTimer) { clearInterval(metarTimer); metarTimer = null; }
+    renderWindSock(null);
+  }
+
   // Bottom-nav Flights/Radar tab switch (formerly the header Cards/Radar toggle). Radar goes
   // full-screen (see .radarWrap.show), replacing the whole Flights-tab content area rather than
   // sitting alongside it.
@@ -2368,6 +2515,9 @@ function updateAirportHeader() {
           if (radarMap) radarMap.invalidateSize();
         });
       });
+      startMetarPolling();
+    } else {
+      stopMetarPolling();
     }
   }
 
