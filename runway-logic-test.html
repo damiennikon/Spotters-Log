@@ -887,14 +887,26 @@ const RUNWAYS = {
 };
 
 // RUNWAYS.YBBN's 10/190 headings above are MAGNETIC, not true -- but ADS-B track data (used
-// everywhere below) is TRUE. Computing the bearing directly between each runway's own threshold
-// and its reciprocal runway's threshold instead gives ~27deg/~207deg true, which lines up with
-// YBBN's published 11E magnetic variation (10+11=21, close enough given rounding on both sides)
-// and, more tellingly, matches its published 2000m parallel-runway separation almost exactly when
-// the two thresholds are projected onto that axis (only ~1485m on the old 190deg axis). This
+// everywhere below) is TRUE. Computing the bearing directly between each strip's own threshold
+// and its reciprocal threshold instead gives ~27deg/~207deg true, which lines up with YBBN's
+// published 11E magnetic variation (10+11=21, close enough given rounding on both sides) and,
+// more tellingly, matches its published 2000m parallel-runway separation almost exactly when the
+// two 01-thresholds are projected onto that axis (only ~1485m on the old 190deg axis). This
 // overwrites each YBBN entry's `heading` with that self-derived true value so every downstream
 // consumer (predictRunwayGeometry's cross-track projection, archerfieldDividerLon, etc.) compares
 // against the runway's real orientation instead of a magnetic one rotated ~17deg away from it.
+//
+// Averages the two strips' bearings into ONE shared heading per family (01L & 01R both get the
+// same value; 19L & 19R get its reciprocal) rather than using each strip's own independently-
+// derived bearing. This matters beyond precision: predictRunwayGeometry groups a family via
+// STRICT equality (`rwys.filter(r => r.heading === bestHeading)`), exactly as the old hardcoded
+// values did (both literally 10, both literally 190) -- 01L and 01R are different physical
+// strips, and their independently-derived bearings differ by a few hundredths of a degree
+// (rounding noise in the "approx" SkyVector threshold coordinates noted above, not real
+// non-parallel geometry -- these runways are parallel by design), which is enough for strict
+// equality to fail and silently collapse `candidates` down to a single runway, skipping the
+// entire L/R cross-track disambiguation branch further down. Averaging keeps both family members
+// numerically identical, exactly like the values they're replacing.
 //
 // Generic and self-correcting: only touches entries that actually carry thrLat/thrLon on both
 // ends of a reciprocal pair. Right now that's just YBBN's four runways -- every other airport in
@@ -907,15 +919,27 @@ const RUNWAYS = {
 // bearingAtoB below); reusing it keeps both derivations consistent instead of maintaining two
 // slightly different bearing formulas that could drift apart. The difference from a flat-earth
 // projection is negligible at this scale (<0.01deg here).
-const YBBN_RECIPROCAL_RUNWAY = { '01L': '19R', '01R': '19L', '19L': '01R', '19R': '01L' };
+const YBBN_STRIP_PAIRS = [['01L', '19R'], ['01R', '19L']];
 (function deriveYbbnHeadingsFromThresholds() {
   const rwys = RUNWAYS.YBBN || [];
+  const byName = name => rwys.find(r => r.name === name);
+  const hasThr = r => r && typeof r.thrLat === 'number' && typeof r.thrLon === 'number';
+
+  const strip01Bearings = [];
+  for (const [name01, name19] of YBBN_STRIP_PAIRS) {
+    const r01 = byName(name01), r19 = byName(name19);
+    if (!hasThr(r01) || !hasThr(r19)) continue;
+    strip01Bearings.push(bearingDeg(r01.thrLat, r01.thrLon, r19.thrLat, r19.thrLon));
+  }
+  if (!strip01Bearings.length) return;
+
+  const heading01 = strip01Bearings.reduce((a, b) => a + b, 0) / strip01Bearings.length;
+  const heading19 = (heading01 + 180) % 360;
+
   for (const rwy of rwys) {
-    if (typeof rwy.thrLat !== 'number' || typeof rwy.thrLon !== 'number') continue;
-    const reciprocalName = YBBN_RECIPROCAL_RUNWAY[rwy.name];
-    const reciprocal = reciprocalName && rwys.find(r => r.name === reciprocalName);
-    if (!reciprocal || typeof reciprocal.thrLat !== 'number' || typeof reciprocal.thrLon !== 'number') continue;
-    rwy.heading = bearingDeg(rwy.thrLat, rwy.thrLon, reciprocal.thrLat, reciprocal.thrLon);
+    if (!hasThr(rwy)) continue;
+    if (/^01/.test(rwy.name)) rwy.heading = heading01;
+    else if (/^19/.test(rwy.name)) rwy.heading = heading19;
   }
 })();
 
@@ -1851,9 +1875,25 @@ function predictRunwayGeometry(it) {
       // genuinely established aircraft is well under this ceiling at any distance in range.
       if (!( ((aligned && onApproachSide && nearCenterline) || closeInFallback) && altPlausibleForEarlyCall )) return null;
 
-      // Upgrade to HIGH confidence when close & tightly aligned
+      // Upgrade to HIGH confidence when close & tightly aligned.
+      //
+      // With YBBN's headings now true (see deriveYbbnHeadingsFromThresholds), a genuine final's
+      // bestDiff sits near 0deg instead of the ~17deg it used to (right at the old branch 1's
+      // <=18 edge, against the old magnetic heading) -- so branch 1 below now gets the ~18deg of
+      // real-world tolerance (wind correction angle, track noise) it was always meant to have,
+      // and will correctly fire earlier/more often. That's the intended effect of the fix, not a
+      // new risk -- L/R side selection is still separately gated by MIN_LR_MARGIN_NM below, and
+      // caching/locking a side is gated by predictRunwayForAircraft's sustained-streak
+      // requirement plus the margin-based lock check.
+      //
+      // Branch 2 (no crossNm cap of its own -- only inherits <=6NM from nearCenterline above) is
+      // different: its real-world edge margin for a genuine final went from 25-17=8deg to
+      // 25-0=25deg -- now looser than branch 1 despite covering closer-in range (<=6NM, where an
+      // aircraft should be MORE converged, not less) and having no lateral cross-track check to
+      // compensate. Tightened to <=15deg (below branch 1's 18deg) so the closer-in, no-crossNm-cap
+      // branch doesn't end up more permissive than the farther-out, crossNm-gated one.
       const highRaw = (typeof dnm === 'number' && dnm <= 12 && bestDiff <= 18 && crossNm <= 3 && onApproachSide) ||
-                   (typeof dnm === 'number' && dnm <= 6 && bestDiff <= 25);
+                   (typeof dnm === 'number' && dnm <= 6 && bestDiff <= 15);
       const high = highRaw && (towardAirportCos == null || towardAirportCos >= 0.55);
       if (high) level = 'high';
     } else {
@@ -1893,6 +1933,23 @@ function predictRunwayGeometry(it) {
         }
 
         const p = toXY(lat, lon);
+
+        // Perpendicular separation between the two parallel centerlines themselves (not the
+        // aircraft), computed at runtime from their own threshold coordinates rather than a
+        // hardcoded constant -- so it stays correct if the thresholds/headings above ever
+        // change. Used below (and by predictRunwayForAircraft's lock decision) to express
+        // "how decisively separated is the winner from the runner-up" as a fraction of the
+        // actual runway spacing instead of an arbitrary absolute NM figure. ~1.08NM at YBBN
+        // with the corrected headings (was reading ~0.8NM against the old magnetic axis).
+        let separationNm = null;
+        if (candidates.length === 2) {
+          const hdgRef = (candidates[0].heading || bestHeading) * rad;
+          const fxRef = Math.sin(hdgRef), fyRef = Math.cos(hdgRef);
+          const lxRef = -fyRef, lyRef = fxRef;
+          const thrPts = candidates.map(c => toXY(c.thrLat, c.thrLon));
+          const perp = thrPts.map(t => t.x * lxRef + t.y * lyRef);
+          separationNm = Math.abs(perp[0] - perp[1]) / 1852;
+        }
 
         // Evaluate cross-track distance to every candidate's extended centerline up front
         // (not just the winner) so we can also measure how clearly separated the winner
@@ -1947,7 +2004,11 @@ function predictRunwayGeometry(it) {
           const otherCross = evals.reduce((m, e) => (e.c === best ? m : Math.min(m, e.crossNm)), Infinity);
           const margin = otherCross - bestCross;
           const lrLevel = (margin < MIN_LR_MARGIN_NM) ? 'guess' : level;
-          return { name: best.name, level: lrLevel };
+          // crossNm/marginNm/separationNm ride along on the returned object (harmless for
+          // existing consumers, which only read name/level) so predictRunwayForAircraft's lock
+          // decision can judge "how decisively separated from the runner-up" as a fraction of
+          // the real runway spacing, without recomputing this geometry a second time.
+          return { name: best.name, level: lrLevel, crossNm: bestCross, marginNm: margin, separationNm };
         }
       }
 
@@ -1964,6 +2025,73 @@ function predictRunwayGeometry(it) {
   } catch { return null; }
 }
 
+// Outer safety ceiling for isGeometryTrustworthyForLock() below. dnm<=3 used to do double duty
+// as BOTH "the geometry has genuinely converged" AND "this is close enough to trust regardless".
+// Now that convergence is judged by margin (see below), this ceiling's only job is the second
+// one: an absolute backstop so a coincidentally-aligned aircraft far out (e.g. 25NM, still on a
+// STAR leg that happens to point at the field) can never lock, no matter how clean its margin
+// numbers look. Set above predictRunwayGeometry's own dnm<=12 'high' cutoff (see highRaw above)
+// so it's not the binding constraint in normal operation -- it's a backstop for if that cutoff
+// is ever loosened later without this being revisited too.
+const RUNWAY_LOCK_OUTER_CEILING_NM = 15;
+
+// The winner's own cross-track distance must be within this fraction of the actual parallel-
+// runway separation (computed at runtime from the thresholds themselves -- see separationNm in
+// predictRunwayGeometry above, ~1.08NM at YBBN with the corrected headings) to count as "close
+// to its own centerline". Picked from the upper-middle of the suggested 0.35-0.40 range: strict
+// enough that at YBBN's ~1.08NM spacing this requires the winner to be within ~0.41NM of its own
+// line, biased toward caution since this gates a permanent, un-downgradable lock.
+const RUNWAY_LOCK_WINNER_CROSS_FRACTION = 0.38;
+
+// The margin over the runner-up must be at least this fraction of the separation to count as
+// "clearly separated", not just numerically closer. Upper-middle of the suggested 0.45-0.50
+// range -- at YBBN's ~1.08NM spacing this requires the runner-up to be roughly twice as far from
+// its own centerline as the winner is from its (~0.52NM+ further away), which is a materially
+// stronger bar than the existing MIN_LR_MARGIN_NM=0.25 (an absolute figure used only to avoid
+// showing a coin-flip 'guess', not to justify a permanent lock).
+const RUNWAY_LOCK_MARGIN_FRACTION = 0.48;
+
+// Whether a geometry result is trustworthy enough to lock in permanently (runwayLockCache in
+// render(), and the priority-over-bay-estimate short-circuit in predictRunwayForAircraft below).
+// Replaces the old flat "dnm <= 3" rule, which conflated "close enough that geometry has
+// probably converged" with "close enough to trust regardless of how converged it actually is" --
+// the same raw distance was standing in for two different questions. This separates them:
+// distance now only supplies the outer safety ceiling; actual trustworthiness is judged by how
+// decisively the winning centerline is separated from the runner-up, relative to the real
+// runway spacing (see the three constants above).
+//
+// KEEPS the getSustainedGeometrySide() streak requirement in front of the margin check, not
+// instead of it: this is the most consequential change in this codebase's prediction logic, and
+// the dnm<=3 rule it replaces exists specifically because of a documented, deliberately-preserved
+// regression (commit b8736b4, see GEOMETRY_AGREEMENT_MIN_STREAK's comment above) where trusting a
+// SINGLE high-confidence geometry read -- even one that individually looked clean -- caused a
+// wrong call while the aircraft was still transiting the bay. A margin-decisive single poll is
+// stronger evidence than the plain 'high' read that regression was built around, but "stronger"
+// isn't the same guarantee "sustained" is, so a lock still requires BOTH: this poll's geometry is
+// 'high' AND margin-decisive, AND that same side has been the sustained geometry answer for
+// GEOMETRY_AGREEMENT_MIN_STREAK consecutive polls spanning GEOMETRY_AGREEMENT_MIN_SPAN_NM of
+// real closing distance.
+//
+// For results without parallel-runway margin data (a single-candidate pick, or any airport other
+// than YBBN, which is the only one with threshold coordinates populated) there's no runner-up to
+// be decisively separated from, so this falls back to the original dnm<=3 rule verbatim --
+// unchanged behavior for every case this task isn't touching.
+function isGeometryTrustworthyForLock(precise, dnm, key) {
+  if (!precise || precise.level !== 'high') return false;
+  if (!(typeof dnm === 'number' && dnm <= RUNWAY_LOCK_OUTER_CEILING_NM)) return false;
+
+  if (typeof precise.separationNm === 'number' && precise.separationNm > 0 &&
+      typeof precise.crossNm === 'number' && typeof precise.marginNm === 'number') {
+    const decisive =
+      precise.crossNm <= RUNWAY_LOCK_WINNER_CROSS_FRACTION * precise.separationNm &&
+      precise.marginNm >= RUNWAY_LOCK_MARGIN_FRACTION * precise.separationNm;
+    if (!decisive) return false;
+    return getSustainedGeometrySide(key) === precise.name;
+  }
+
+  return typeof dnm === 'number' && dnm <= 3;
+}
+
 // Records this aircraft's earliest position for the bay-entry estimate above, then runs the
 // precise cross-track geometry. For a YBBN 19-family approach between roughly 3NM and 18NM,
 // the bay-side evidence (earliest-entry, then current-position) is checked and preferred BEFORE
@@ -1975,12 +2103,12 @@ function predictRunwayGeometry(it) {
 // side it will land on". The simple real-world-validated east/west divider signal doesn't have
 // that failure mode.
 //
-// But by <=3NM -- the same range at which runwayLockCache actually locks a 'high' result in --
-// the geometry has genuinely converged, so a 'high' result there is checked and returned FIRST,
+// But once isGeometryTrustworthyForLock() says the geometry has genuinely, decisively converged
+// (see above -- no longer a flat <=3NM rule), a 'high' result is checked and returned FIRST,
 // before either bay-side estimate gets a chance to run at all. This has to be an explicit check
 // ahead of both of them: the bay-side checks' own self-exclusion only kicks in at dnm<=2 (see
-// their own dnm>2 guard), which leaves a (2,3]NM sliver where they're still active and could
-// otherwise override an already-converged, cross-track-verified 'high' call.
+// their own dnm>2 guard), which leaves a sliver where they're still active and could otherwise
+// override an already-converged, cross-track-verified 'high' call.
 //
 // Below 'high' -- including a null result, or outside the bay-side checks' distance/family
 // window (e.g. 01-family approaches, or other airports where they always return null) -- we
@@ -1995,20 +2123,20 @@ function predictRunwayGeometry(it) {
 // and always wins. When there's no recent confirmed evidence yet, this is a no-op and
 // behavior is unchanged.
 //
-// One more override sits between the <=3NM short-circuit above and the bay-side estimates:
+// One more override sits between the lock short-circuit above and the bay-side estimates:
 // getSustainedGeometrySide() (see geometryAgreementCache above). getRecentConfirmedFamily()
 // can only ever catch a 19-vs-01 mixup (extractRunwayFamily collapses 19L/19R to the same
-// family), so outside <=3NM there was previously NO way for an aircraft that genuinely breaks
-// the "usual" bay-entry-side pattern (e.g. entering from the east but landing 19R instead of
-// the usual 19L) to ever correct before touchdown -- estimateBayEntryEarly's answer is fixed
-// from the aircraft's first tracked position and returned unconditionally for the whole
-// dnm∈(2,18] window, which also means estimateBaySideCurrent's own majority-vote history never
-// even gets a chance to run for the common case (first poll >=12NM out). A single contradicting
-// 'high' geometry read still isn't trusted here -- that's exactly the shape of bug commit
-// b8736b4 fixed (QLK365D flipped wrong on one misleading close read while still transiting the
-// bay) -- but a genuinely SUSTAINED run of them (GEOMETRY_AGREEMENT_MIN_STREAK consecutive
-// 'high' reads for the same side, spread over GEOMETRY_AGREEMENT_MIN_SPAN_NM of real closing
-// distance) is strong enough evidence to win early.
+// family), so outside the lock short-circuit there was previously NO way for an aircraft that
+// genuinely breaks the "usual" bay-entry-side pattern (e.g. entering from the east but landing
+// 19R instead of the usual 19L) to ever correct before touchdown -- estimateBayEntryEarly's
+// answer is fixed from the aircraft's first tracked position and returned unconditionally for
+// the whole dnm∈(2,18] window, which also means estimateBaySideCurrent's own majority-vote
+// history never even gets a chance to run for the common case (first poll >=12NM out). A single
+// contradicting 'high' geometry read still isn't trusted here -- that's exactly the shape of bug
+// commit b8736b4 fixed (QLK365D flipped wrong on one misleading close read while still
+// transiting the bay) -- but a genuinely SUSTAINED run of them (GEOMETRY_AGREEMENT_MIN_STREAK
+// consecutive 'high' reads for the same side, spread over GEOMETRY_AGREEMENT_MIN_SPAN_NM of real
+// closing distance) is strong enough evidence to win early.
 function predictRunwayForAircraft(it) {
   const key = getRunwayCacheKey(it);
   recordBayEntryPosition(it, key);
@@ -2024,7 +2152,7 @@ function predictRunwayForAircraft(it) {
   const contradictsActiveFamily = (result) =>
     !!(result && activeFamily && extractRunwayFamily(result.name) !== activeFamily);
 
-  if (precise && precise.level === 'high' && typeof dnm === 'number' && dnm <= 3) return precise;
+  if (precise && isGeometryTrustworthyForLock(precise, dnm, key)) return precise;
 
   // Non-null only when THIS poll's own geometry is itself 'high' on that side too -- a single
   // non-matching read resets the streak in recordGeometryAgreement above -- so returning
@@ -3471,14 +3599,19 @@ function airlineNameFromFlight(flight) {
 
       if (!rwyInfo) {
         rwyInfo = predictRunwayForAircraft(it);
-        // Only lock the cache in close — 'high' confidence can now fire as far out as ~12nm
-        // (since the cross-track match runs at range too), but that early call can still be
-        // wrong if the aircraft hasn't fully converged onto its centerline yet. Caching it
-        // then would freeze a possibly-wrong answer for the rest of the approach. Locking
-        // only inside 3nm keeps the cache doing what it's actually for: stabilising the
-        // chip right at the point display starts (2nm), not "remembering" an early guess.
-        if (_rk && rwyInfo && rwyInfo.level === 'high' && !cached &&
-            typeof dnm === 'number' && dnm <= 3) {
+        // 'high' confidence can now fire as far out as ~12nm (since the cross-track match runs
+        // at range too), but that alone isn't enough to freeze a permanent answer -- an early
+        // 'high' can still be wrong if the aircraft hasn't actually converged onto its
+        // centerline yet. isGeometryTrustworthyForLock() (see its comment above, near
+        // predictRunwayForAircraft) is the actual gate: margin-decisive relative to the real
+        // runway separation, sustained over multiple polls, under an outer distance ceiling --
+        // replacing the old flat "dnm <= 3" rule. Checked independently here rather than
+        // trusting rwyInfo.level === 'high' alone, because predictRunwayForAircraft can also
+        // return a plain 'high' read that hasn't cleared that bar yet (e.g. when no bay-side
+        // estimate is available to prefer instead) -- only a result that actually clears
+        // isGeometryTrustworthyForLock should ever be written into runwayLockCache, which
+        // never downgrades once set.
+        if (_rk && rwyInfo && !cached && isGeometryTrustworthyForLock(rwyInfo, dnm, _rk)) {
           runwayLockCache.set(_rk, { name: rwyInfo.name, ts: Date.now() });
         }
       }
