@@ -886,6 +886,39 @@ const RUNWAYS = {
   ],
 };
 
+// RUNWAYS.YBBN's 10/190 headings above are MAGNETIC, not true -- but ADS-B track data (used
+// everywhere below) is TRUE. Computing the bearing directly between each runway's own threshold
+// and its reciprocal runway's threshold instead gives ~27deg/~207deg true, which lines up with
+// YBBN's published 11E magnetic variation (10+11=21, close enough given rounding on both sides)
+// and, more tellingly, matches its published 2000m parallel-runway separation almost exactly when
+// the two thresholds are projected onto that axis (only ~1485m on the old 190deg axis). This
+// overwrites each YBBN entry's `heading` with that self-derived true value so every downstream
+// consumer (predictRunwayGeometry's cross-track projection, archerfieldDividerLon, etc.) compares
+// against the runway's real orientation instead of a magnetic one rotated ~17deg away from it.
+//
+// Generic and self-correcting: only touches entries that actually carry thrLat/thrLon on both
+// ends of a reciprocal pair. Right now that's just YBBN's four runways -- every other airport in
+// RUNWAYS has no thrLat/thrLon populated, so this is a no-op for all of them.
+//
+// Reuses bearingDeg() (defined further down, but a hoisted function declaration in this same
+// IIFE) rather than a separate flat-earth calculation -- it's the same spherical bearing formula
+// already used for this exact threshold-to-threshold computation when drawing the extended
+// centerlines on the radar map (see the "Derive the extension direction..." comment near
+// bearingAtoB below); reusing it keeps both derivations consistent instead of maintaining two
+// slightly different bearing formulas that could drift apart. The difference from a flat-earth
+// projection is negligible at this scale (<0.01deg here).
+const YBBN_RECIPROCAL_RUNWAY = { '01L': '19R', '01R': '19L', '19L': '01R', '19R': '01L' };
+(function deriveYbbnHeadingsFromThresholds() {
+  const rwys = RUNWAYS.YBBN || [];
+  for (const rwy of rwys) {
+    if (typeof rwy.thrLat !== 'number' || typeof rwy.thrLon !== 'number') continue;
+    const reciprocalName = YBBN_RECIPROCAL_RUNWAY[rwy.name];
+    const reciprocal = reciprocalName && rwys.find(r => r.name === reciprocalName);
+    if (!reciprocal || typeof reciprocal.thrLat !== 'number' || typeof reciprocal.thrLon !== 'number') continue;
+    rwy.heading = bearingDeg(rwy.thrLat, rwy.thrLon, reciprocal.thrLat, reciprocal.thrLon);
+  }
+})();
+
 // Heuristic reference point used for earlier 01L/01R prediction at Brisbane (YBBN).
 // Archerfield Airport (YBAF) is a reliable east/west divider for southern arrivals -- real
 // 01L-bound traffic passes west of the field, real 01R-bound traffic passes east.
@@ -1734,14 +1767,17 @@ function predictRunwayGeometry(it) {
         dnm <= 30 &&
         // Must be meaningfully moving toward the airport (cos>~0.2 handled above; we also require not-away)
         (towardAirportCos == null || towardAirportCos > 0.10) &&
-        // Track must actually be consistent with a 01-approach (~010°), not just "closer to 010
-        // than to 190". A relative comparison like that is satisfied by roughly the entire
-        // northern half-circle (~280°-100°), so an aircraft still on a STAR/vector leg well off
-        // an actual final heading -- e.g. heading out over Moreton Bay to loop back for a 19
-        // approach from the north -- can trip it while still nominally south of the field and
-        // "toward" it in a broad sense. Use a real absolute tolerance instead, consistent with
-        // the geometry match's own bestDiff <= 28 "aligned" gate below.
-        angleDiffDeg(track, 10) <= 45 &&
+        // Track must actually be consistent with a 01-approach (~027° true, post heading-fix --
+        // see deriveYbbnHeadingsFromThresholds above), not just "closer to 01 than to 19". A
+        // relative comparison like that is satisfied by roughly the entire northern half-circle
+        // (~280°-100°), so an aircraft still on a STAR/vector leg well off an actual final
+        // heading -- e.g. heading out over Moreton Bay to loop back for a 19 approach from the
+        // north -- can trip it while still nominally south of the field and "toward" it in a
+        // broad sense. Use a real absolute tolerance instead, consistent with the geometry
+        // match's own bestDiff <= 28 "aligned" gate below. Centered on the runway's own
+        // (corrected) heading rather than a re-hardcoded literal, so this can't drift out of
+        // sync with RUNWAYS.YBBN again.
+        angleDiffDeg(track, (rwys.find(r => r.name === '01L' || r.name === '01R') || {}).heading ?? 10) <= 45 &&
         altPlausibleForEarlyCall
       ) {
         // East of the Archerfield-corridor divider (projected to this aircraft's own latitude,
