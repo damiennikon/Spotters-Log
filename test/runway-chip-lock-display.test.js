@@ -122,10 +122,19 @@ function loadModule() {
     extractStatement(html, 'const GEOMETRY_AGREEMENT_MAX_GAP_MS ='),
     extractFunction(html, 'recordGeometryAgreement'),
     extractFunction(html, 'getSustainedGeometrySide'),
+    // predictRunwayGeometry's Archerfield branch references this directly; the rest of the
+    // archerfieldAgreementCache infrastructure is needed for isArcherfieldSustainedForLock below.
+    extractStatement(html, 'const ARCHERFIELD_AGREEMENT_MIN_OFFSET_NM ='),
+    extractStatement(html, 'const ARCHERFIELD_AGREEMENT_MIN_STREAK ='),
+    extractStatement(html, 'const ARCHERFIELD_AGREEMENT_MIN_SPAN_NM ='),
+    extractStatement(html, 'const ARCHERFIELD_AGREEMENT_MAX_GAP_MS ='),
+    extractFunction(html, 'recordArcherfieldAgreement'),
+    extractFunction(html, 'getSustainedArcherfieldSide'),
     extractStatement(html, 'const RUNWAY_LOCK_OUTER_CEILING_NM ='),
     extractStatement(html, 'const RUNWAY_LOCK_WINNER_CROSS_FRACTION ='),
     extractStatement(html, 'const RUNWAY_LOCK_MARGIN_FRACTION ='),
     extractFunction(html, 'isGeometryTrustworthyForLock'),
+    extractFunction(html, 'isArcherfieldSustainedForLock'),
     extractFunction(html, 'predictRunwayForAircraft'),
   ].join('\n\n');
 
@@ -135,6 +144,7 @@ function loadModule() {
     const runwayLockCache = new Map();
     const baySideHistoryCache = new Map();
     const geometryAgreementCache = new Map();
+    const archerfieldAgreementCache = new Map();
     ${pieces}
 
     // Mirrors the render()-loop display decision in runway-logic-test.html line-for-line,
@@ -148,7 +158,10 @@ function loadModule() {
         rwyInfo = { name: cached.name, level: 'high' };
       } else {
         rwyInfo = predictRunwayForAircraft(it);
-        if (_rk && rwyInfo && isGeometryTrustworthyForLock(rwyInfo, dnm, _rk)) {
+        if (_rk && rwyInfo && isArcherfieldSustainedForLock(rwyInfo, dnm, _rk)) {
+          runwayLockCache.set(_rk, { name: rwyInfo.name, ts: Date.now() });
+          rwyInfo = { name: rwyInfo.name, level: 'high' };
+        } else if (_rk && rwyInfo && isGeometryTrustworthyForLock(rwyInfo, dnm, _rk)) {
           runwayLockCache.set(_rk, { name: rwyInfo.name, ts: Date.now() });
         }
       }
@@ -164,6 +177,7 @@ function loadModule() {
     return {
       RUNWAYS,
       projectPointNm,
+      archerfieldDividerLon,
       displayDecisionForPoll,
       runwayLockCache,
       setAPT: (apt) => { APT = apt; },
@@ -250,4 +264,78 @@ test('a fresh, not-yet-locked result still displays once inside the original <=2
   const result = mod.displayDecisionForPoll(it);
   assert.equal(result.isLocked, false, 'sanity: a single fresh poll should not itself be locked yet');
   assert.equal(result.name, '01L', 'the original <=2.0NM fallback must still reveal a fresh, non-locked result close-in');
+});
+
+// ===== Archerfield-sustained lock (the 01-family equivalent of the cross-track lock above) =====
+//
+// The Archerfield 01L/01R early-call rule (see predictRunwayGeometry) short-circuits BEFORE the
+// cross-track/highRaw logic ever runs, always returning level: 'likely+' -- so a 01-family
+// approach could never reach isGeometryTrustworthyForLock's 'high'-only gate at all, no matter
+// how converged it was, and stayed hidden until <=2.0NM regardless (confirmed live: two real
+// approaches, both stuck on "Check map to confirm runway" from 12NM down to 2NM). This mirrors
+// the cross-track lock tests above, but for isArcherfieldSustainedForLock's separate streak
+// (archerfieldAgreementCache) instead.
+
+test('a genuine, sustained 01-family approach reveals the RWY chip once locked, well before 2NM, and never hides it again', () => {
+  const mod = loadPredictor();
+  const rwy = mod.RUNWAYS.YBBN.find((r) => r.name === '01L');
+  const approachBearing = (rwy.heading + 180) % 360; // south of the threshold
+  const distances = [20, 17, 14, 11, 8, 5.5, 3.5, 2.2, 1.2, 0.4];
+
+  const trace = distances.map((d) => {
+    const [lat, lon] = mod.projectPointNm(rwy.thrLat, rwy.thrLon, approachBearing, d);
+    const dnm = haversineNm(lat, lon, YBBN.lat, YBBN.lon);
+    const it = { lat, lon, track: rwy.heading, _dist_nm: dnm, alt_baro: Math.max(50, 300 * d), reg: 'ARCHTESTCONVERGE' };
+    return mod.displayDecisionForPoll(it);
+  });
+
+  const firstLockedIdx = trace.findIndex((t) => t.isLocked);
+  assert.ok(firstLockedIdx !== -1, 'expected the approach to lock at some point');
+  assert.ok(trace[firstLockedIdx].dnm > 2.0, `expected the first lock to happen beyond 2NM, but locked at ${trace[firstLockedIdx].dnm.toFixed(2)}NM`);
+  assert.equal(trace[firstLockedIdx].name, '01L');
+  // Locking should show 'high' styling immediately on the same poll it locks, not lag one poll
+  // behind showing 'likely+' first (see the cosmetic fix in render()'s write branch).
+  assert.equal(trace[firstLockedIdx].level, 'high');
+
+  for (const t of trace.slice(firstLockedIdx)) {
+    assert.equal(t.isLocked, true, `expected to stay locked at ${t.dnm.toFixed(2)}NM`);
+    assert.equal(t.name, '01L', `expected to keep showing 01L at ${t.dnm.toFixed(2)}NM, got ${JSON.stringify(t)}`);
+  }
+
+  for (const t of trace.slice(0, firstLockedIdx)) {
+    assert.equal(t.name, null, `expected no display yet at ${t.dnm.toFixed(2)}NM (not yet locked)`);
+  }
+});
+
+test('an isolated single Archerfield poll with no history does not reveal early', () => {
+  const mod = loadPredictor();
+  const rwy = mod.RUNWAYS.YBBN.find((r) => r.name === '01L');
+  const approachBearing = (rwy.heading + 180) % 360;
+  const [lat, lon] = mod.projectPointNm(rwy.thrLat, rwy.thrLon, approachBearing, 12);
+  const dnm = haversineNm(lat, lon, YBBN.lat, YBBN.lon);
+  const it = { lat, lon, track: rwy.heading, _dist_nm: dnm, alt_baro: 1500, reg: 'ARCHISOLATED' };
+
+  const result = mod.displayDecisionForPoll(it);
+  assert.equal(result.isLocked, false);
+  assert.equal(result.name, null, 'a single confident-looking Archerfield read with no sustained streak must not display early');
+});
+
+test('polls sitting right on the Archerfield divider (not confidently on either side) never build a lockable streak', () => {
+  const mod = loadPredictor();
+  const rwy01L = mod.RUNWAYS.YBBN.find((r) => r.name === '01L');
+  // Sit exactly ON the TRUE divider (archerfieldDividerLon, which projects each runway's own
+  // centerline to the aircraft's own latitude -- NOT the static raw threshold-longitude
+  // midpoint, since 01L/01R have different threshold latitudes too) at each test latitude --
+  // an ambiguous position, not a confident side call, even though the binary >/< comparison in
+  // predictRunwayGeometry still has to name SOME side.
+  const results = [];
+  for (let i = 0; i < 6; i++) {
+    const lat = -27.65 - i * 0.02;
+    const lon = mod.archerfieldDividerLon(lat);
+    const it = { lat, lon, track: rwy01L.heading, _dist_nm: 15 - i, alt_baro: 1200, reg: 'ARCHSTRADDLE' };
+    results.push(mod.displayDecisionForPoll(it));
+  }
+  for (const r of results) {
+    assert.equal(r.isLocked, false, `expected an ambiguous, on-the-divider read to never lock, got ${JSON.stringify(r)}`);
+  }
 });

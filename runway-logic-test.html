@@ -1729,6 +1729,119 @@ function getSustainedGeometrySide(key) {
   return e.name;
 }
 
+// Same streak concept as geometryAgreementCache above, but for the Archerfield 01L/01R
+// early-call rule (see predictRunwayGeometry's Archerfield branch below) instead of the
+// cross-track match. Deliberately a SEPARATE cache/streak, not folded into
+// geometryAgreementCache: that cache's whole contract (see its own comment, and
+// recordGeometryAgreement's b8736b4 history) is specifically about precise cross-track
+// agreement, and blending in a coarser, different heuristic (a simple east/west divider check)
+// would blur what a "sustained" entry there actually means, for both mechanisms.
+//
+// The Archerfield rule normally returns 'likely+' unconditionally and never elevates its own
+// level -- this cache/streak is consulted externally (see isArcherfieldSustainedForLock below)
+// to decide when a run of confident, consistent Archerfield calls is trustworthy enough to lock
+// in early, mirroring how a sustained cross-track 'high' streak is required before THAT gets
+// trusted for locking, without touching the semantics of either existing mechanism.
+const archerfieldAgreementCache = new Map();
+const ARCHERFIELD_AGREEMENT_STORE_KEY = "photolog_archerfield_agreement_v1";
+
+// How far off the divider (see archerfieldDividerLon) a poll's position must be, in NM, to count
+// as a confident side call rather than sitting ambiguously close to the line. Reuses
+// BAY_ENTRY_MIN_LON_OFFSET_NM's value (0.5NM) -- the same order of magnitude corridor half-width
+// (~1.08NM parallel-runway separation / 2) as that constant was calibrated against, so this
+// isn't a fresh, untested number.
+const ARCHERFIELD_AGREEMENT_MIN_OFFSET_NM = 0.5;
+
+// Same streak/span requirements as GEOMETRY_AGREEMENT_MIN_STREAK/MIN_SPAN_NM above, reused
+// rather than inventing new ones: the Archerfield divider is a coarser signal than precise
+// cross-track geometry, so it deserves at least the same rigor, and these values are already a
+// deliberate, documented calibration in this exact codebase (see b8736b4 above).
+const ARCHERFIELD_AGREEMENT_MIN_STREAK = 3;
+const ARCHERFIELD_AGREEMENT_MIN_SPAN_NM = 1.0;
+const ARCHERFIELD_AGREEMENT_MAX_GAP_MS = 60 * 1000;
+
+function pruneArcherfieldAgreementCache(activeKeys) {
+  const now = Date.now();
+  const TTL_MS = 20 * 60 * 1000; // 20 minutes, same as the other per-aircraft caches
+  for (const [k, v] of archerfieldAgreementCache.entries()) {
+    if (!k) { archerfieldAgreementCache.delete(k); continue; }
+    if (activeKeys && !activeKeys.has(k) && (now - (v.ts || 0)) > TTL_MS) {
+      archerfieldAgreementCache.delete(k);
+    }
+  }
+}
+
+// Persist across reloads, same reasoning as saveGeometryAgreementCache above.
+function saveArcherfieldAgreementCache() {
+  try {
+    const icao = (APT && APT.icao) ? String(APT.icao).toUpperCase() : '';
+    if (!icao) return;
+    localStorage.setItem(ARCHERFIELD_AGREEMENT_STORE_KEY,
+      JSON.stringify({ icao, entries: Array.from(archerfieldAgreementCache.entries()) }));
+  } catch {}
+}
+
+function loadArcherfieldAgreementCache() {
+  try {
+    const icao = (APT && APT.icao) ? String(APT.icao).toUpperCase() : '';
+    if (!icao) return;
+    const raw = localStorage.getItem(ARCHERFIELD_AGREEMENT_STORE_KEY);
+    if (!raw) return;
+    const o = JSON.parse(raw);
+    if (!o || typeof o !== 'object' || o.icao !== icao || !Array.isArray(o.entries)) return;
+    for (const [k, v] of o.entries) {
+      if (k && v && typeof v.ts === 'number' && typeof v.name === 'string' &&
+          typeof v.count === 'number') {
+        archerfieldAgreementCache.set(k, v);
+      }
+    }
+    pruneArcherfieldAgreementCache(new Set());
+  } catch {}
+}
+
+// Records this poll's Archerfield-rule result into the streak. Deliberately called on EVERY
+// predictRunwayForAircraft() invocation, unconditionally -- mirrors recordGeometryAgreement's
+// call site and reasoning exactly. "Agreement" only ever means a confident (>=
+// ARCHERFIELD_AGREEMENT_MIN_OFFSET_NM from the divider), same-side Archerfield read --
+// anything else (no Archerfield read this poll at all, e.g. a 19-family approach or one outside
+// the rule's own conditions; a marginal read too close to the divider; or a different side)
+// resets it, same as an outright contradiction.
+function recordArcherfieldAgreement(key, precise, dnm) {
+  if (!key) return;
+  const name = (precise && precise.archerfieldConfident && typeof precise.archerfieldSide === 'string')
+    ? precise.archerfieldSide : null;
+  if (!name) { archerfieldAgreementCache.delete(key); return; }
+  const prev = archerfieldAgreementCache.get(key);
+  const gapped = !!(prev && typeof prev.ts === 'number' &&
+    (Date.now() - prev.ts) > ARCHERFIELD_AGREEMENT_MAX_GAP_MS);
+  if (prev && prev.name === name && !gapped) {
+    prev.count += 1;
+    if (typeof dnm === 'number' && Number.isFinite(dnm)) prev.lastDnm = dnm;
+    prev.ts = Date.now();
+  } else {
+    archerfieldAgreementCache.set(key, {
+      name,
+      count: 1,
+      firstDnm: (typeof dnm === 'number' && Number.isFinite(dnm)) ? dnm : null,
+      lastDnm: (typeof dnm === 'number' && Number.isFinite(dnm)) ? dnm : null,
+      ts: Date.now(),
+    });
+  }
+}
+
+// Returns the side ('01L'/'01R') the Archerfield rule has SUSTAINED agreement on for this key,
+// or null if the streak doesn't yet qualify. Read-only -- does not mutate
+// archerfieldAgreementCache. Mirrors getSustainedGeometrySide exactly.
+function getSustainedArcherfieldSide(key) {
+  if (!key) return null;
+  const e = archerfieldAgreementCache.get(key);
+  if (!e || e.count < ARCHERFIELD_AGREEMENT_MIN_STREAK) return null;
+  if (!(typeof e.firstDnm === 'number' && typeof e.lastDnm === 'number')) return null;
+  const span = e.firstDnm - e.lastDnm;
+  if (!(span >= ARCHERFIELD_AGREEMENT_MIN_SPAN_NM)) return null;
+  return e.name;
+}
+
 function predictRunwayGeometry(it) {
   try {
     const icao = (APT && APT.icao) ? String(APT.icao).toUpperCase() : '';
@@ -1806,8 +1919,18 @@ function predictRunwayGeometry(it) {
       ) {
         // East of the Archerfield-corridor divider (projected to this aircraft's own latitude,
         // see archerfieldDividerLon above) => 01R, West => 01L
-        const side = (lon0 > archerfieldDividerLon(lat0)) ? '01R' : '01L';
-        return { name: side, level: 'likely+' };
+        const dividerLon = archerfieldDividerLon(lat0);
+        const side = (lon0 > dividerLon) ? '01R' : '01L';
+        // How far off the divider this poll actually is, in NM -- a position essentially ON
+        // the line is not a confident side call, just because the binary comparison above has
+        // to pick one. `archerfieldSide`/`archerfieldConfident` ride along on the returned
+        // object purely for recordArcherfieldAgreement (see its comment, called from
+        // predictRunwayForAircraft) to build a sustained-agreement streak from -- this branch's
+        // own `level` stays 'likely+' unconditionally, exactly as before; the streak is an
+        // external gate on top, not a change to what this function decides per-poll.
+        const offsetNm = Math.abs(lon0 - dividerLon) * Math.cos(lat0 * Math.PI / 180) * 60;
+        const archerfieldConfident = offsetNm >= ARCHERFIELD_AGREEMENT_MIN_OFFSET_NM;
+        return { name: side, level: 'likely+', archerfieldSide: side, archerfieldConfident };
       }
       // No unconditional return here — fall through to the general cross-track logic below,
       // which compares actual position against each candidate runway's own extended
@@ -2092,6 +2215,25 @@ function isGeometryTrustworthyForLock(precise, dnm, key) {
   return typeof dnm === 'number' && dnm <= 3;
 }
 
+// Separate lock-eligibility check for the Archerfield 01L/01R early-call rule -- NOT folded
+// into isGeometryTrustworthyForLock above, which is built entirely around a 'high'-level
+// cross-track result (its first line rejects anything else outright) and a Archerfield result
+// never sets level: 'high' (see predictRunwayGeometry's Archerfield branch -- its own per-poll
+// decision is untouched by any of this). Trustworthy for locking only when: this poll's own
+// Archerfield read is confident (>= ARCHERFIELD_AGREEMENT_MIN_OFFSET_NM from the divider), AND
+// that same side has been the sustained Archerfield answer for
+// ARCHERFIELD_AGREEMENT_MIN_STREAK consecutive qualifying polls spanning
+// ARCHERFIELD_AGREEMENT_MIN_SPAN_NM of real closing distance (see archerfieldAgreementCache
+// above) -- same b8736b4-motivated "a single confident-looking read isn't enough" reasoning as
+// the cross-track case, just against this rule's own separate streak. Shares
+// RUNWAY_LOCK_OUTER_CEILING_NM as its outer distance backstop for the same reason: an absolute
+// ceiling that doesn't rely on any other gate being correctly maintained.
+function isArcherfieldSustainedForLock(precise, dnm, key) {
+  if (!precise || !precise.archerfieldConfident || typeof precise.archerfieldSide !== 'string') return false;
+  if (!(typeof dnm === 'number' && dnm <= RUNWAY_LOCK_OUTER_CEILING_NM)) return false;
+  return getSustainedArcherfieldSide(key) === precise.archerfieldSide;
+}
+
 // Records this aircraft's earliest position for the bay-entry estimate above, then runs the
 // precise cross-track geometry. For a YBBN 19-family approach between roughly 3NM and 18NM,
 // the bay-side evidence (earliest-entry, then current-position) is checked and preferred BEFORE
@@ -2147,6 +2289,9 @@ function predictRunwayForAircraft(it) {
   // Unconditional, every poll -- see recordGeometryAgreement's comment above for why this must
   // not be gated behind whether a bay-side estimate already answered.
   recordGeometryAgreement(key, precise, dnm);
+  // Same reasoning, separate streak -- see archerfieldAgreementCache's comment above for why
+  // this isn't folded into recordGeometryAgreement.
+  recordArcherfieldAgreement(key, precise, dnm);
 
   const activeFamily = getRecentConfirmedFamily();
   const contradictsActiveFamily = (result) =>
@@ -2208,6 +2353,7 @@ loadRunwayLockCache();
 loadBayEntryCache();
 loadBaySideHistoryCache();
 loadGeometryAgreementCache();
+loadArcherfieldAgreementCache();
 loadDepartureTrackCache();
 
 function updateAirportHeader() {
@@ -2951,10 +3097,12 @@ function resetRunwayPredictionCaches() {
   bayEntryCache.clear();
   baySideHistoryCache.clear();
   geometryAgreementCache.clear();
+  archerfieldAgreementCache.clear();
   try { localStorage.removeItem(RUNWAY_LOCK_STORE_KEY); } catch {}
   try { localStorage.removeItem(BAY_ENTRY_STORE_KEY); } catch {}
   try { localStorage.removeItem(BAY_SIDE_HISTORY_STORE_KEY); } catch {}
   try { localStorage.removeItem(GEOMETRY_AGREEMENT_STORE_KEY); } catch {}
+  try { localStorage.removeItem(ARCHERFIELD_AGREEMENT_STORE_KEY); } catch {}
 }
 
 function applySelectedAirport(apt) {
@@ -3614,7 +3762,20 @@ function airlineNameFromFlight(flight) {
         // isGeometryTrustworthyForLock should ever be written into runwayLockCache, which
         // never downgrades once set. (`!cached` is implicit here -- this branch only runs when
         // the cache lookup above found nothing.)
-        if (_rk && rwyInfo && isGeometryTrustworthyForLock(rwyInfo, dnm, _rk)) {
+        //
+        // isArcherfieldSustainedForLock (see its own comment above) is the equivalent gate for
+        // the Archerfield 01L/01R early-call rule, which never sets level: 'high' at all -- it
+        // has its own separate sustained-agreement streak (archerfieldAgreementCache), checked
+        // here as an OR alongside the cross-track gate rather than folded into it.
+        if (_rk && rwyInfo && isArcherfieldSustainedForLock(rwyInfo, dnm, _rk)) {
+          runwayLockCache.set(_rk, { name: rwyInfo.name, ts: Date.now() });
+          // Match the cached-branch display above ({ level: 'high' }) on the SAME poll the lock
+          // is written, rather than showing this poll's raw 'likely+' and only picking up 'high'
+          // styling on the next poll once the cache re-read above finds it -- purely cosmetic
+          // (the name/lock itself is identical either way), but avoids a one-poll flash of the
+          // wrong confidence styling on an otherwise-already-locked result.
+          rwyInfo = { name: rwyInfo.name, level: 'high' };
+        } else if (_rk && rwyInfo && isGeometryTrustworthyForLock(rwyInfo, dnm, _rk)) {
           runwayLockCache.set(_rk, { name: rwyInfo.name, ts: Date.now() });
         }
       }
@@ -3806,10 +3967,12 @@ function airlineNameFromFlight(flight) {
     pruneBayEntryCache(activeKeys);
     pruneBaySideHistoryCache(activeKeys);
     pruneGeometryAgreementCache(activeKeys);
+    pruneArcherfieldAgreementCache(activeKeys);
     saveRunwayLockCache();
     saveBayEntryCache();
     saveBaySideHistoryCache();
     saveGeometryAgreementCache();
+    saveArcherfieldAgreementCache();
   }
 
   // Departures card renderer -- separate from render() above (which stays the arrivals path,

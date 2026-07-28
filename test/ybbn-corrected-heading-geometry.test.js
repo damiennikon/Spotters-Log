@@ -109,6 +109,9 @@ function loadModule() {
     extractConstObject(html, 'ARCHERFIELD'),
     extractFunction(html, 'archerfieldDividerLon'),
     extractStatement(html, 'const EARLY_CALL_MAX_ALT_FT_PER_NM ='),
+    // predictRunwayGeometry's Archerfield branch now references this directly (see
+    // archerfieldAgreementCache's comment in runway-logic-test.html).
+    extractStatement(html, 'const ARCHERFIELD_AGREEMENT_MIN_OFFSET_NM ='),
     extractFunction(html, 'angleDiffDeg'),
     extractFunction(html, 'bearingDeg'),
     extractFunction(html, 'projectPointNm'),
