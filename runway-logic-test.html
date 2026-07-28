@@ -554,14 +554,18 @@
   }
   /* Info/help button replaces the old permanently-visible .radarHint paragraph -- floats over the
      full-screen map (bottom-left, clear of Leaflet's own top-left zoom control and bottom-right
-     attribution) and reveals the same text in a tap-to-open popover instead of occupying space. */
+     attribution) and reveals the same text in a tap-to-open popover instead of occupying space.
+     bottom:66px (rather than sitting flush at the corner) clears the .centerlineLegend Leaflet
+     control below it -- that control only ever renders for YBBN (the only airport with an entry
+     in RUNWAY_STRIP_PAIRS) at a fixed 2 rows, so this fixed offset won't need to react to
+     varying legend content. */
   .radarHintBtn{
-    position:absolute; left:12px; bottom:12px; z-index:10;
+    position:absolute; left:12px; bottom:66px; z-index:10;
     width:36px; height:36px; border-radius:50%; padding:0;
     display:grid; place-items:center; color:var(--text-2); cursor:pointer;
   }
   .radarHintPopover{
-    position:absolute; left:12px; bottom:58px; z-index:11;
+    position:absolute; left:12px; bottom:112px; z-index:11;
     max-width:min(280px, calc(100vw - 24px));
     padding:10px 12px; border-radius:var(--r-md);
     color:var(--text-3); font-size:12px; line-height:1.5;
