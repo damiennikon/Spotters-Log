@@ -276,6 +276,20 @@
   .statusChip.sc-est{ color:var(--text-3); }
   .statusChip.sc-est .scDot{ background:var(--text-3); }
 
+  /* Golden-hour indicator (Flights tab header, below the airport sub-line) -- same compact
+     dot+text shape as .statusChip above, permanently warm/amber (--warn) rather than switching
+     color by state, since "showing at all" already implies the warm-light state is relevant.
+     Hidden by default; JS toggles `.show` only when golden hour is either active or starting
+     within the next ~2 hours, so it silently disappears the rest of the day instead of showing
+     a stale/irrelevant computation. */
+  .goldenHourChip{
+    display:none; align-items:center; gap:6px;
+    font-size:11.5px; font-weight:600; color:var(--warn);
+    margin-top:4px;
+  }
+  .goldenHourChip.show{ display:inline-flex; }
+  .ghDot{ width:7px; height:7px; border-radius:50%; background:var(--warn); flex:0 0 auto; }
+
   /* ---------- Hero card (first item in the current list) ---------- */
   .heroBlock{ display:flex; flex-direction:column; gap:8px; }
   .heroLabel{
@@ -554,14 +568,18 @@
   }
   /* Info/help button replaces the old permanently-visible .radarHint paragraph -- floats over the
      full-screen map (bottom-left, clear of Leaflet's own top-left zoom control and bottom-right
-     attribution) and reveals the same text in a tap-to-open popover instead of occupying space. */
+     attribution) and reveals the same text in a tap-to-open popover instead of occupying space.
+     Stacked directly ABOVE .centerlineLegend (also bottom-left, added by drawRunwayStrips() as a
+     Leaflet 'bottomleft' control) rather than sharing its footprint -- bottom offset is tuned to
+     clear the legend's fixed 2-row height (YBBN's only pair set) plus Leaflet's own 10px control
+     margin, with a small gap on top of that. */
   .radarHintBtn{
-    position:absolute; left:12px; bottom:12px; z-index:10;
+    position:absolute; left:12px; bottom:78px; z-index:10;
     width:36px; height:36px; border-radius:50%; padding:0;
     display:grid; place-items:center; color:var(--text-2); cursor:pointer;
   }
   .radarHintPopover{
-    position:absolute; left:12px; bottom:58px; z-index:11;
+    position:absolute; left:12px; bottom:124px; z-index:11;
     max-width:min(280px, calc(100vw - 24px));
     padding:10px 12px; border-radius:var(--r-md);
     color:var(--text-3); font-size:12px; line-height:1.5;
@@ -569,6 +587,27 @@
   }
   .radarHintPopover b{ color:var(--accent); font-weight:700; }
   .radarHintPopover.show{ display:block; }
+  /* Wind direction indicator (METAR-sourced, top-right) -- purely informational, same visual
+     treatment as the other radar overlays (glass, absolute over the map). .radarFilterRow.overlay
+     (above) is `left:12;right:12` -- an absolutely-positioned flex container with no explicit
+     width auto-stretches to fill that whole span, so its glass pill actually reaches the full top
+     edge even though its buttons only occupy the left part of it. Placed below that pill's bottom
+     edge (measured height ~44px) rather than at top:12, so it doesn't render on top of/inside it;
+     still visually top-right and clear of the bottom-left hint/legend stack. Hidden by default;
+     JS toggles `.show` only once a real METAR wind reading is available, so a failed/unavailable
+     fetch never leaves a broken icon on screen. */
+  .windSock{
+    position:absolute; top:68px; right:12px; z-index:10;
+    display:none; align-items:center; gap:6px;
+    padding:6px 10px; border-radius:999px;
+    color:var(--text-2);
+  }
+  .windSock.show{ display:flex; }
+  .windSockArrow{ width:18px; height:18px; flex:none; color:var(--accent); transition:transform 0.4s ease; }
+  .windSockLabel{
+    font-family:'IBM Plex Mono',monospace; font-size:11px; font-weight:600;
+    letter-spacing:0.02em; color:var(--text); white-space:nowrap;
+  }
   .acPlane{ width:18px; height:18px; transform-origin:50% 50%; filter:drop-shadow(0 2px 3px rgba(0,0,0,0.45)); opacity:0.95; color:var(--accent); }
   .acLabel{
     margin-top:2px; padding:2px 7px; border-radius:999px;
@@ -619,6 +658,7 @@
         <div>
           <h1>Shot Log</h1>
           <div class="sub">Arriving Soon – <span id="aptName">Brisbane</span> (<span id="aptIcao">YBBN</span>)</div>
+          <div id="goldenHourIndicator" class="goldenHourChip"><span class="ghDot"></span><span id="goldenHourText"></span></div>
         </div>
       </div>
     </div>
@@ -700,6 +740,12 @@
           <svg width="18" height="18" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7.5" stroke="currentColor" stroke-width="1.5"/><path d="M10 9v4.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="10" cy="6.6" r="0.9" fill="currentColor"/></svg>
         </button>
         <div id="radarHintPopover" class="radarHintPopover glass" role="tooltip">Arrivals (white) and departures (violet) plotted top-down. Ring = 30 NM. Tap a marker for details. <b>Zoom in near the airport to see runway guides.</b></div>
+        <div id="windSock" class="windSock glass" role="img">
+          <svg id="windSockArrow" class="windSockArrow" width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+            <path d="M10 17V3M10 3L6.2 7.8M10 3L13.8 7.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <span id="windSockLabel" class="windSockLabel">--kt</span>
+        </div>
       </div>
   </div>
 
@@ -885,6 +931,63 @@ const RUNWAYS = {
     { name: "05", heading: 50 }, { name: "23", heading: 230 },
   ],
 };
+
+// RUNWAYS.YBBN's 10/190 headings above are MAGNETIC, not true -- but ADS-B track data (used
+// everywhere below) is TRUE. Computing the bearing directly between each strip's own threshold
+// and its reciprocal threshold instead gives ~27deg/~207deg true, which lines up with YBBN's
+// published 11E magnetic variation (10+11=21, close enough given rounding on both sides) and,
+// more tellingly, matches its published 2000m parallel-runway separation almost exactly when the
+// two 01-thresholds are projected onto that axis (only ~1485m on the old 190deg axis). This
+// overwrites each YBBN entry's `heading` with that self-derived true value so every downstream
+// consumer (predictRunwayGeometry's cross-track projection, archerfieldDividerLon, etc.) compares
+// against the runway's real orientation instead of a magnetic one rotated ~17deg away from it.
+//
+// Averages the two strips' bearings into ONE shared heading per family (01L & 01R both get the
+// same value; 19L & 19R get its reciprocal) rather than using each strip's own independently-
+// derived bearing. This matters beyond precision: predictRunwayGeometry groups a family via
+// STRICT equality (`rwys.filter(r => r.heading === bestHeading)`), exactly as the old hardcoded
+// values did (both literally 10, both literally 190) -- 01L and 01R are different physical
+// strips, and their independently-derived bearings differ by a few hundredths of a degree
+// (rounding noise in the "approx" SkyVector threshold coordinates noted above, not real
+// non-parallel geometry -- these runways are parallel by design), which is enough for strict
+// equality to fail and silently collapse `candidates` down to a single runway, skipping the
+// entire L/R cross-track disambiguation branch further down. Averaging keeps both family members
+// numerically identical, exactly like the values they're replacing.
+//
+// Generic and self-correcting: only touches entries that actually carry thrLat/thrLon on both
+// ends of a reciprocal pair. Right now that's just YBBN's four runways -- every other airport in
+// RUNWAYS has no thrLat/thrLon populated, so this is a no-op for all of them.
+//
+// Reuses bearingDeg() (defined further down, but a hoisted function declaration in this same
+// IIFE) rather than a separate flat-earth calculation -- it's the same spherical bearing formula
+// already used for this exact threshold-to-threshold computation when drawing the extended
+// centerlines on the radar map (see the "Derive the extension direction..." comment near
+// bearingAtoB below); reusing it keeps both derivations consistent instead of maintaining two
+// slightly different bearing formulas that could drift apart. The difference from a flat-earth
+// projection is negligible at this scale (<0.01deg here).
+const YBBN_STRIP_PAIRS = [['01L', '19R'], ['01R', '19L']];
+(function deriveYbbnHeadingsFromThresholds() {
+  const rwys = RUNWAYS.YBBN || [];
+  const byName = name => rwys.find(r => r.name === name);
+  const hasThr = r => r && typeof r.thrLat === 'number' && typeof r.thrLon === 'number';
+
+  const strip01Bearings = [];
+  for (const [name01, name19] of YBBN_STRIP_PAIRS) {
+    const r01 = byName(name01), r19 = byName(name19);
+    if (!hasThr(r01) || !hasThr(r19)) continue;
+    strip01Bearings.push(bearingDeg(r01.thrLat, r01.thrLon, r19.thrLat, r19.thrLon));
+  }
+  if (!strip01Bearings.length) return;
+
+  const heading01 = strip01Bearings.reduce((a, b) => a + b, 0) / strip01Bearings.length;
+  const heading19 = (heading01 + 180) % 360;
+
+  for (const rwy of rwys) {
+    if (!hasThr(rwy)) continue;
+    if (/^01/.test(rwy.name)) rwy.heading = heading01;
+    else if (/^19/.test(rwy.name)) rwy.heading = heading19;
+  }
+})();
 
 // Heuristic reference point used for earlier 01L/01R prediction at Brisbane (YBBN).
 // Archerfield Airport (YBAF) is a reliable east/west divider for southern arrivals -- real
@@ -1672,6 +1775,119 @@ function getSustainedGeometrySide(key) {
   return e.name;
 }
 
+// Same streak concept as geometryAgreementCache above, but for the Archerfield 01L/01R
+// early-call rule (see predictRunwayGeometry's Archerfield branch below) instead of the
+// cross-track match. Deliberately a SEPARATE cache/streak, not folded into
+// geometryAgreementCache: that cache's whole contract (see its own comment, and
+// recordGeometryAgreement's b8736b4 history) is specifically about precise cross-track
+// agreement, and blending in a coarser, different heuristic (a simple east/west divider check)
+// would blur what a "sustained" entry there actually means, for both mechanisms.
+//
+// The Archerfield rule normally returns 'likely+' unconditionally and never elevates its own
+// level -- this cache/streak is consulted externally (see isArcherfieldSustainedForLock below)
+// to decide when a run of confident, consistent Archerfield calls is trustworthy enough to lock
+// in early, mirroring how a sustained cross-track 'high' streak is required before THAT gets
+// trusted for locking, without touching the semantics of either existing mechanism.
+const archerfieldAgreementCache = new Map();
+const ARCHERFIELD_AGREEMENT_STORE_KEY = "photolog_archerfield_agreement_v1";
+
+// How far off the divider (see archerfieldDividerLon) a poll's position must be, in NM, to count
+// as a confident side call rather than sitting ambiguously close to the line. Reuses
+// BAY_ENTRY_MIN_LON_OFFSET_NM's value (0.5NM) -- the same order of magnitude corridor half-width
+// (~1.08NM parallel-runway separation / 2) as that constant was calibrated against, so this
+// isn't a fresh, untested number.
+const ARCHERFIELD_AGREEMENT_MIN_OFFSET_NM = 0.5;
+
+// Same streak/span requirements as GEOMETRY_AGREEMENT_MIN_STREAK/MIN_SPAN_NM above, reused
+// rather than inventing new ones: the Archerfield divider is a coarser signal than precise
+// cross-track geometry, so it deserves at least the same rigor, and these values are already a
+// deliberate, documented calibration in this exact codebase (see b8736b4 above).
+const ARCHERFIELD_AGREEMENT_MIN_STREAK = 3;
+const ARCHERFIELD_AGREEMENT_MIN_SPAN_NM = 1.0;
+const ARCHERFIELD_AGREEMENT_MAX_GAP_MS = 60 * 1000;
+
+function pruneArcherfieldAgreementCache(activeKeys) {
+  const now = Date.now();
+  const TTL_MS = 20 * 60 * 1000; // 20 minutes, same as the other per-aircraft caches
+  for (const [k, v] of archerfieldAgreementCache.entries()) {
+    if (!k) { archerfieldAgreementCache.delete(k); continue; }
+    if (activeKeys && !activeKeys.has(k) && (now - (v.ts || 0)) > TTL_MS) {
+      archerfieldAgreementCache.delete(k);
+    }
+  }
+}
+
+// Persist across reloads, same reasoning as saveGeometryAgreementCache above.
+function saveArcherfieldAgreementCache() {
+  try {
+    const icao = (APT && APT.icao) ? String(APT.icao).toUpperCase() : '';
+    if (!icao) return;
+    localStorage.setItem(ARCHERFIELD_AGREEMENT_STORE_KEY,
+      JSON.stringify({ icao, entries: Array.from(archerfieldAgreementCache.entries()) }));
+  } catch {}
+}
+
+function loadArcherfieldAgreementCache() {
+  try {
+    const icao = (APT && APT.icao) ? String(APT.icao).toUpperCase() : '';
+    if (!icao) return;
+    const raw = localStorage.getItem(ARCHERFIELD_AGREEMENT_STORE_KEY);
+    if (!raw) return;
+    const o = JSON.parse(raw);
+    if (!o || typeof o !== 'object' || o.icao !== icao || !Array.isArray(o.entries)) return;
+    for (const [k, v] of o.entries) {
+      if (k && v && typeof v.ts === 'number' && typeof v.name === 'string' &&
+          typeof v.count === 'number') {
+        archerfieldAgreementCache.set(k, v);
+      }
+    }
+    pruneArcherfieldAgreementCache(new Set());
+  } catch {}
+}
+
+// Records this poll's Archerfield-rule result into the streak. Deliberately called on EVERY
+// predictRunwayForAircraft() invocation, unconditionally -- mirrors recordGeometryAgreement's
+// call site and reasoning exactly. "Agreement" only ever means a confident (>=
+// ARCHERFIELD_AGREEMENT_MIN_OFFSET_NM from the divider), same-side Archerfield read --
+// anything else (no Archerfield read this poll at all, e.g. a 19-family approach or one outside
+// the rule's own conditions; a marginal read too close to the divider; or a different side)
+// resets it, same as an outright contradiction.
+function recordArcherfieldAgreement(key, precise, dnm) {
+  if (!key) return;
+  const name = (precise && precise.archerfieldConfident && typeof precise.archerfieldSide === 'string')
+    ? precise.archerfieldSide : null;
+  if (!name) { archerfieldAgreementCache.delete(key); return; }
+  const prev = archerfieldAgreementCache.get(key);
+  const gapped = !!(prev && typeof prev.ts === 'number' &&
+    (Date.now() - prev.ts) > ARCHERFIELD_AGREEMENT_MAX_GAP_MS);
+  if (prev && prev.name === name && !gapped) {
+    prev.count += 1;
+    if (typeof dnm === 'number' && Number.isFinite(dnm)) prev.lastDnm = dnm;
+    prev.ts = Date.now();
+  } else {
+    archerfieldAgreementCache.set(key, {
+      name,
+      count: 1,
+      firstDnm: (typeof dnm === 'number' && Number.isFinite(dnm)) ? dnm : null,
+      lastDnm: (typeof dnm === 'number' && Number.isFinite(dnm)) ? dnm : null,
+      ts: Date.now(),
+    });
+  }
+}
+
+// Returns the side ('01L'/'01R') the Archerfield rule has SUSTAINED agreement on for this key,
+// or null if the streak doesn't yet qualify. Read-only -- does not mutate
+// archerfieldAgreementCache. Mirrors getSustainedGeometrySide exactly.
+function getSustainedArcherfieldSide(key) {
+  if (!key) return null;
+  const e = archerfieldAgreementCache.get(key);
+  if (!e || e.count < ARCHERFIELD_AGREEMENT_MIN_STREAK) return null;
+  if (!(typeof e.firstDnm === 'number' && typeof e.lastDnm === 'number')) return null;
+  const span = e.firstDnm - e.lastDnm;
+  if (!(span >= ARCHERFIELD_AGREEMENT_MIN_SPAN_NM)) return null;
+  return e.name;
+}
+
 function predictRunwayGeometry(it) {
   try {
     const icao = (APT && APT.icao) ? String(APT.icao).toUpperCase() : '';
@@ -1734,20 +1950,33 @@ function predictRunwayGeometry(it) {
         dnm <= 30 &&
         // Must be meaningfully moving toward the airport (cos>~0.2 handled above; we also require not-away)
         (towardAirportCos == null || towardAirportCos > 0.10) &&
-        // Track must actually be consistent with a 01-approach (~010°), not just "closer to 010
-        // than to 190". A relative comparison like that is satisfied by roughly the entire
-        // northern half-circle (~280°-100°), so an aircraft still on a STAR/vector leg well off
-        // an actual final heading -- e.g. heading out over Moreton Bay to loop back for a 19
-        // approach from the north -- can trip it while still nominally south of the field and
-        // "toward" it in a broad sense. Use a real absolute tolerance instead, consistent with
-        // the geometry match's own bestDiff <= 28 "aligned" gate below.
-        angleDiffDeg(track, 10) <= 45 &&
+        // Track must actually be consistent with a 01-approach (~027° true, post heading-fix --
+        // see deriveYbbnHeadingsFromThresholds above), not just "closer to 01 than to 19". A
+        // relative comparison like that is satisfied by roughly the entire northern half-circle
+        // (~280°-100°), so an aircraft still on a STAR/vector leg well off an actual final
+        // heading -- e.g. heading out over Moreton Bay to loop back for a 19 approach from the
+        // north -- can trip it while still nominally south of the field and "toward" it in a
+        // broad sense. Use a real absolute tolerance instead, consistent with the geometry
+        // match's own bestDiff <= 28 "aligned" gate below. Centered on the runway's own
+        // (corrected) heading rather than a re-hardcoded literal, so this can't drift out of
+        // sync with RUNWAYS.YBBN again.
+        angleDiffDeg(track, (rwys.find(r => r.name === '01L' || r.name === '01R') || {}).heading ?? 10) <= 45 &&
         altPlausibleForEarlyCall
       ) {
         // East of the Archerfield-corridor divider (projected to this aircraft's own latitude,
         // see archerfieldDividerLon above) => 01R, West => 01L
-        const side = (lon0 > archerfieldDividerLon(lat0)) ? '01R' : '01L';
-        return { name: side, level: 'likely+' };
+        const dividerLon = archerfieldDividerLon(lat0);
+        const side = (lon0 > dividerLon) ? '01R' : '01L';
+        // How far off the divider this poll actually is, in NM -- a position essentially ON
+        // the line is not a confident side call, just because the binary comparison above has
+        // to pick one. `archerfieldSide`/`archerfieldConfident` ride along on the returned
+        // object purely for recordArcherfieldAgreement (see its comment, called from
+        // predictRunwayForAircraft) to build a sustained-agreement streak from -- this branch's
+        // own `level` stays 'likely+' unconditionally, exactly as before; the streak is an
+        // external gate on top, not a change to what this function decides per-poll.
+        const offsetNm = Math.abs(lon0 - dividerLon) * Math.cos(lat0 * Math.PI / 180) * 60;
+        const archerfieldConfident = offsetNm >= ARCHERFIELD_AGREEMENT_MIN_OFFSET_NM;
+        return { name: side, level: 'likely+', archerfieldSide: side, archerfieldConfident };
       }
       // No unconditional return here — fall through to the general cross-track logic below,
       // which compares actual position against each candidate runway's own extended
@@ -1815,9 +2044,25 @@ function predictRunwayGeometry(it) {
       // genuinely established aircraft is well under this ceiling at any distance in range.
       if (!( ((aligned && onApproachSide && nearCenterline) || closeInFallback) && altPlausibleForEarlyCall )) return null;
 
-      // Upgrade to HIGH confidence when close & tightly aligned
+      // Upgrade to HIGH confidence when close & tightly aligned.
+      //
+      // With YBBN's headings now true (see deriveYbbnHeadingsFromThresholds), a genuine final's
+      // bestDiff sits near 0deg instead of the ~17deg it used to (right at the old branch 1's
+      // <=18 edge, against the old magnetic heading) -- so branch 1 below now gets the ~18deg of
+      // real-world tolerance (wind correction angle, track noise) it was always meant to have,
+      // and will correctly fire earlier/more often. That's the intended effect of the fix, not a
+      // new risk -- L/R side selection is still separately gated by MIN_LR_MARGIN_NM below, and
+      // caching/locking a side is gated by predictRunwayForAircraft's sustained-streak
+      // requirement plus the margin-based lock check.
+      //
+      // Branch 2 (no crossNm cap of its own -- only inherits <=6NM from nearCenterline above) is
+      // different: its real-world edge margin for a genuine final went from 25-17=8deg to
+      // 25-0=25deg -- now looser than branch 1 despite covering closer-in range (<=6NM, where an
+      // aircraft should be MORE converged, not less) and having no lateral cross-track check to
+      // compensate. Tightened to <=15deg (below branch 1's 18deg) so the closer-in, no-crossNm-cap
+      // branch doesn't end up more permissive than the farther-out, crossNm-gated one.
       const highRaw = (typeof dnm === 'number' && dnm <= 12 && bestDiff <= 18 && crossNm <= 3 && onApproachSide) ||
-                   (typeof dnm === 'number' && dnm <= 6 && bestDiff <= 25);
+                   (typeof dnm === 'number' && dnm <= 6 && bestDiff <= 15);
       const high = highRaw && (towardAirportCos == null || towardAirportCos >= 0.55);
       if (high) level = 'high';
     } else {
@@ -1857,6 +2102,23 @@ function predictRunwayGeometry(it) {
         }
 
         const p = toXY(lat, lon);
+
+        // Perpendicular separation between the two parallel centerlines themselves (not the
+        // aircraft), computed at runtime from their own threshold coordinates rather than a
+        // hardcoded constant -- so it stays correct if the thresholds/headings above ever
+        // change. Used below (and by predictRunwayForAircraft's lock decision) to express
+        // "how decisively separated is the winner from the runner-up" as a fraction of the
+        // actual runway spacing instead of an arbitrary absolute NM figure. ~1.08NM at YBBN
+        // with the corrected headings (was reading ~0.8NM against the old magnetic axis).
+        let separationNm = null;
+        if (candidates.length === 2) {
+          const hdgRef = (candidates[0].heading || bestHeading) * rad;
+          const fxRef = Math.sin(hdgRef), fyRef = Math.cos(hdgRef);
+          const lxRef = -fyRef, lyRef = fxRef;
+          const thrPts = candidates.map(c => toXY(c.thrLat, c.thrLon));
+          const perp = thrPts.map(t => t.x * lxRef + t.y * lyRef);
+          separationNm = Math.abs(perp[0] - perp[1]) / 1852;
+        }
 
         // Evaluate cross-track distance to every candidate's extended centerline up front
         // (not just the winner) so we can also measure how clearly separated the winner
@@ -1911,7 +2173,11 @@ function predictRunwayGeometry(it) {
           const otherCross = evals.reduce((m, e) => (e.c === best ? m : Math.min(m, e.crossNm)), Infinity);
           const margin = otherCross - bestCross;
           const lrLevel = (margin < MIN_LR_MARGIN_NM) ? 'guess' : level;
-          return { name: best.name, level: lrLevel };
+          // crossNm/marginNm/separationNm ride along on the returned object (harmless for
+          // existing consumers, which only read name/level) so predictRunwayForAircraft's lock
+          // decision can judge "how decisively separated from the runner-up" as a fraction of
+          // the real runway spacing, without recomputing this geometry a second time.
+          return { name: best.name, level: lrLevel, crossNm: bestCross, marginNm: margin, separationNm };
         }
       }
 
@@ -1928,6 +2194,92 @@ function predictRunwayGeometry(it) {
   } catch { return null; }
 }
 
+// Outer safety ceiling for isGeometryTrustworthyForLock() below. dnm<=3 used to do double duty
+// as BOTH "the geometry has genuinely converged" AND "this is close enough to trust regardless".
+// Now that convergence is judged by margin (see below), this ceiling's only job is the second
+// one: an absolute backstop so a coincidentally-aligned aircraft far out (e.g. 25NM, still on a
+// STAR leg that happens to point at the field) can never lock, no matter how clean its margin
+// numbers look. Set above predictRunwayGeometry's own dnm<=12 'high' cutoff (see highRaw above)
+// so it's not the binding constraint in normal operation -- it's a backstop for if that cutoff
+// is ever loosened later without this being revisited too.
+const RUNWAY_LOCK_OUTER_CEILING_NM = 15;
+
+// The winner's own cross-track distance must be within this fraction of the actual parallel-
+// runway separation (computed at runtime from the thresholds themselves -- see separationNm in
+// predictRunwayGeometry above, ~1.08NM at YBBN with the corrected headings) to count as "close
+// to its own centerline". Picked from the upper-middle of the suggested 0.35-0.40 range: strict
+// enough that at YBBN's ~1.08NM spacing this requires the winner to be within ~0.41NM of its own
+// line, biased toward caution since this gates a permanent, un-downgradable lock.
+const RUNWAY_LOCK_WINNER_CROSS_FRACTION = 0.38;
+
+// The margin over the runner-up must be at least this fraction of the separation to count as
+// "clearly separated", not just numerically closer. Upper-middle of the suggested 0.45-0.50
+// range -- at YBBN's ~1.08NM spacing this requires the runner-up to be roughly twice as far from
+// its own centerline as the winner is from its (~0.52NM+ further away), which is a materially
+// stronger bar than the existing MIN_LR_MARGIN_NM=0.25 (an absolute figure used only to avoid
+// showing a coin-flip 'guess', not to justify a permanent lock).
+const RUNWAY_LOCK_MARGIN_FRACTION = 0.48;
+
+// Whether a geometry result is trustworthy enough to lock in permanently (runwayLockCache in
+// render(), and the priority-over-bay-estimate short-circuit in predictRunwayForAircraft below).
+// Replaces the old flat "dnm <= 3" rule, which conflated "close enough that geometry has
+// probably converged" with "close enough to trust regardless of how converged it actually is" --
+// the same raw distance was standing in for two different questions. This separates them:
+// distance now only supplies the outer safety ceiling; actual trustworthiness is judged by how
+// decisively the winning centerline is separated from the runner-up, relative to the real
+// runway spacing (see the three constants above).
+//
+// KEEPS the getSustainedGeometrySide() streak requirement in front of the margin check, not
+// instead of it: this is the most consequential change in this codebase's prediction logic, and
+// the dnm<=3 rule it replaces exists specifically because of a documented, deliberately-preserved
+// regression (commit b8736b4, see GEOMETRY_AGREEMENT_MIN_STREAK's comment above) where trusting a
+// SINGLE high-confidence geometry read -- even one that individually looked clean -- caused a
+// wrong call while the aircraft was still transiting the bay. A margin-decisive single poll is
+// stronger evidence than the plain 'high' read that regression was built around, but "stronger"
+// isn't the same guarantee "sustained" is, so a lock still requires BOTH: this poll's geometry is
+// 'high' AND margin-decisive, AND that same side has been the sustained geometry answer for
+// GEOMETRY_AGREEMENT_MIN_STREAK consecutive polls spanning GEOMETRY_AGREEMENT_MIN_SPAN_NM of
+// real closing distance.
+//
+// For results without parallel-runway margin data (a single-candidate pick, or any airport other
+// than YBBN, which is the only one with threshold coordinates populated) there's no runner-up to
+// be decisively separated from, so this falls back to the original dnm<=3 rule verbatim --
+// unchanged behavior for every case this task isn't touching.
+function isGeometryTrustworthyForLock(precise, dnm, key) {
+  if (!precise || precise.level !== 'high') return false;
+  if (!(typeof dnm === 'number' && dnm <= RUNWAY_LOCK_OUTER_CEILING_NM)) return false;
+
+  if (typeof precise.separationNm === 'number' && precise.separationNm > 0 &&
+      typeof precise.crossNm === 'number' && typeof precise.marginNm === 'number') {
+    const decisive =
+      precise.crossNm <= RUNWAY_LOCK_WINNER_CROSS_FRACTION * precise.separationNm &&
+      precise.marginNm >= RUNWAY_LOCK_MARGIN_FRACTION * precise.separationNm;
+    if (!decisive) return false;
+    return getSustainedGeometrySide(key) === precise.name;
+  }
+
+  return typeof dnm === 'number' && dnm <= 3;
+}
+
+// Separate lock-eligibility check for the Archerfield 01L/01R early-call rule -- NOT folded
+// into isGeometryTrustworthyForLock above, which is built entirely around a 'high'-level
+// cross-track result (its first line rejects anything else outright) and a Archerfield result
+// never sets level: 'high' (see predictRunwayGeometry's Archerfield branch -- its own per-poll
+// decision is untouched by any of this). Trustworthy for locking only when: this poll's own
+// Archerfield read is confident (>= ARCHERFIELD_AGREEMENT_MIN_OFFSET_NM from the divider), AND
+// that same side has been the sustained Archerfield answer for
+// ARCHERFIELD_AGREEMENT_MIN_STREAK consecutive qualifying polls spanning
+// ARCHERFIELD_AGREEMENT_MIN_SPAN_NM of real closing distance (see archerfieldAgreementCache
+// above) -- same b8736b4-motivated "a single confident-looking read isn't enough" reasoning as
+// the cross-track case, just against this rule's own separate streak. Shares
+// RUNWAY_LOCK_OUTER_CEILING_NM as its outer distance backstop for the same reason: an absolute
+// ceiling that doesn't rely on any other gate being correctly maintained.
+function isArcherfieldSustainedForLock(precise, dnm, key) {
+  if (!precise || !precise.archerfieldConfident || typeof precise.archerfieldSide !== 'string') return false;
+  if (!(typeof dnm === 'number' && dnm <= RUNWAY_LOCK_OUTER_CEILING_NM)) return false;
+  return getSustainedArcherfieldSide(key) === precise.archerfieldSide;
+}
+
 // Records this aircraft's earliest position for the bay-entry estimate above, then runs the
 // precise cross-track geometry. For a YBBN 19-family approach between roughly 3NM and 18NM,
 // the bay-side evidence (earliest-entry, then current-position) is checked and preferred BEFORE
@@ -1939,12 +2291,12 @@ function predictRunwayGeometry(it) {
 // side it will land on". The simple real-world-validated east/west divider signal doesn't have
 // that failure mode.
 //
-// But by <=3NM -- the same range at which runwayLockCache actually locks a 'high' result in --
-// the geometry has genuinely converged, so a 'high' result there is checked and returned FIRST,
+// But once isGeometryTrustworthyForLock() says the geometry has genuinely, decisively converged
+// (see above -- no longer a flat <=3NM rule), a 'high' result is checked and returned FIRST,
 // before either bay-side estimate gets a chance to run at all. This has to be an explicit check
 // ahead of both of them: the bay-side checks' own self-exclusion only kicks in at dnm<=2 (see
-// their own dnm>2 guard), which leaves a (2,3]NM sliver where they're still active and could
-// otherwise override an already-converged, cross-track-verified 'high' call.
+// their own dnm>2 guard), which leaves a sliver where they're still active and could otherwise
+// override an already-converged, cross-track-verified 'high' call.
 //
 // Below 'high' -- including a null result, or outside the bay-side checks' distance/family
 // window (e.g. 01-family approaches, or other airports where they always return null) -- we
@@ -1959,20 +2311,20 @@ function predictRunwayGeometry(it) {
 // and always wins. When there's no recent confirmed evidence yet, this is a no-op and
 // behavior is unchanged.
 //
-// One more override sits between the <=3NM short-circuit above and the bay-side estimates:
+// One more override sits between the lock short-circuit above and the bay-side estimates:
 // getSustainedGeometrySide() (see geometryAgreementCache above). getRecentConfirmedFamily()
 // can only ever catch a 19-vs-01 mixup (extractRunwayFamily collapses 19L/19R to the same
-// family), so outside <=3NM there was previously NO way for an aircraft that genuinely breaks
-// the "usual" bay-entry-side pattern (e.g. entering from the east but landing 19R instead of
-// the usual 19L) to ever correct before touchdown -- estimateBayEntryEarly's answer is fixed
-// from the aircraft's first tracked position and returned unconditionally for the whole
-// dnm∈(2,18] window, which also means estimateBaySideCurrent's own majority-vote history never
-// even gets a chance to run for the common case (first poll >=12NM out). A single contradicting
-// 'high' geometry read still isn't trusted here -- that's exactly the shape of bug commit
-// b8736b4 fixed (QLK365D flipped wrong on one misleading close read while still transiting the
-// bay) -- but a genuinely SUSTAINED run of them (GEOMETRY_AGREEMENT_MIN_STREAK consecutive
-// 'high' reads for the same side, spread over GEOMETRY_AGREEMENT_MIN_SPAN_NM of real closing
-// distance) is strong enough evidence to win early.
+// family), so outside the lock short-circuit there was previously NO way for an aircraft that
+// genuinely breaks the "usual" bay-entry-side pattern (e.g. entering from the east but landing
+// 19R instead of the usual 19L) to ever correct before touchdown -- estimateBayEntryEarly's
+// answer is fixed from the aircraft's first tracked position and returned unconditionally for
+// the whole dnm∈(2,18] window, which also means estimateBaySideCurrent's own majority-vote
+// history never even gets a chance to run for the common case (first poll >=12NM out). A single
+// contradicting 'high' geometry read still isn't trusted here -- that's exactly the shape of bug
+// commit b8736b4 fixed (QLK365D flipped wrong on one misleading close read while still
+// transiting the bay) -- but a genuinely SUSTAINED run of them (GEOMETRY_AGREEMENT_MIN_STREAK
+// consecutive 'high' reads for the same side, spread over GEOMETRY_AGREEMENT_MIN_SPAN_NM of real
+// closing distance) is strong enough evidence to win early.
 function predictRunwayForAircraft(it) {
   const key = getRunwayCacheKey(it);
   recordBayEntryPosition(it, key);
@@ -1983,12 +2335,15 @@ function predictRunwayForAircraft(it) {
   // Unconditional, every poll -- see recordGeometryAgreement's comment above for why this must
   // not be gated behind whether a bay-side estimate already answered.
   recordGeometryAgreement(key, precise, dnm);
+  // Same reasoning, separate streak -- see archerfieldAgreementCache's comment above for why
+  // this isn't folded into recordGeometryAgreement.
+  recordArcherfieldAgreement(key, precise, dnm);
 
   const activeFamily = getRecentConfirmedFamily();
   const contradictsActiveFamily = (result) =>
     !!(result && activeFamily && extractRunwayFamily(result.name) !== activeFamily);
 
-  if (precise && precise.level === 'high' && typeof dnm === 'number' && dnm <= 3) return precise;
+  if (precise && isGeometryTrustworthyForLock(precise, dnm, key)) return precise;
 
   // Non-null only when THIS poll's own geometry is itself 'high' on that side too -- a single
   // non-matching read resets the streak in recordGeometryAgreement above -- so returning
@@ -2044,6 +2399,7 @@ loadRunwayLockCache();
 loadBayEntryCache();
 loadBaySideHistoryCache();
 loadGeometryAgreementCache();
+loadArcherfieldAgreementCache();
 loadDepartureTrackCache();
 
 function updateAirportHeader() {
@@ -2051,6 +2407,156 @@ function updateAirportHeader() {
   const $icao = document.getElementById("aptIcao");
   if ($name) $name.textContent = APT.name || APT.icao || "Airport";
   if ($icao) $icao.textContent = APT.icao || "";
+}
+
+// ===== Golden-hour indicator (Flights tab header) =====
+// Pure local computation (standard low-precision solar position algorithm, Meeus/NOAA formulas)
+// -- no external API, no network cost, so unlike the wind sock this isn't gated to a specific
+// tab or throttled beyond "recompute about once a minute".
+
+// Golden hour ~= sun elevation in [-4deg, 6deg], covering both the "sun near/just above the
+// horizon" morning and evening windows in one band (some definitions split "blue hour" and
+// "golden hour" into separate narrower bands; this app only needs a single practical window for
+// "the light is warm/low and interesting for spotting").
+const GOLDEN_HOUR_MIN_ELEV_DEG = -4;
+const GOLDEN_HOUR_MAX_ELEV_DEG = 6;
+
+// How far ahead to look for an upcoming window, and to search for when an active one ends.
+// 3 hours comfortably covers the "starts within ~2 hours" display threshold with margin to
+// spare, without the lookahead loop running unnecessarily far past what's ever displayed.
+const GOLDEN_HOUR_LOOKAHEAD_MS = 3 * 60 * 60 * 1000;
+const GOLDEN_HOUR_UPCOMING_MAX_MS = 2 * 60 * 60 * 1000;
+const GOLDEN_HOUR_STEP_MS = 60 * 1000;
+
+function toRadDeg(deg) { return deg * Math.PI / 180; }
+function toDegRad(rad) { return rad * 180 / Math.PI; }
+
+// Sun elevation (and azimuth, from true north, clockwise) for a given instant and lat/lon.
+// Standard low-precision solar position algorithm (Jean Meeus' "Astronomical Algorithms" /
+// the same formulas behind NOAA's public solar calculator) -- accurate to a small fraction of a
+// degree, which is far tighter than this feature needs (the golden-hour band itself is 10deg
+// wide).
+function solarPosition(date, lat, lon) {
+  const JD = date.getTime() / 86400000 + 2440587.5; // Julian day (UTC)
+  const T = (JD - 2451545.0) / 36525; // Julian centuries since J2000.0
+
+  const L0 = (280.46646 + T * (36000.76983 + T * 0.0003032)) % 360; // geometric mean longitude
+  const M = 357.52911 + T * (35999.05029 - 0.0001537 * T); // geometric mean anomaly
+  const e = 0.016708634 - T * (0.000042037 + 0.0000001267 * T); // eccentricity of Earth's orbit
+
+  const Mrad = toRadDeg(M);
+  const C = Math.sin(Mrad) * (1.914602 - T * (0.004817 + 0.000014 * T))
+    + Math.sin(2 * Mrad) * (0.019993 - 0.000101 * T)
+    + Math.sin(3 * Mrad) * 0.000289; // equation of center
+
+  const trueLong = L0 + C;
+  const omega = 125.04 - 1934.136 * T;
+  const lambda = trueLong - 0.00569 - 0.00478 * Math.sin(toRadDeg(omega)); // apparent longitude
+
+  const seconds = 21.448 - T * (46.8150 + T * (0.00059 - T * 0.001813));
+  const e0 = 23 + (26 + seconds / 60) / 60; // mean obliquity of the ecliptic
+  const eCorr = e0 + 0.00256 * Math.cos(toRadDeg(omega)); // corrected for nutation
+
+  const decl = toDegRad(Math.asin(Math.sin(toRadDeg(eCorr)) * Math.sin(toRadDeg(lambda))));
+
+  // Equation of time, in minutes.
+  const y = Math.pow(Math.tan(toRadDeg(eCorr) / 2), 2);
+  const Eq = 4 * toDegRad(
+    y * Math.sin(2 * toRadDeg(L0))
+    - 2 * e * Math.sin(Mrad)
+    + 4 * e * y * Math.sin(Mrad) * Math.cos(2 * toRadDeg(L0))
+    - 0.5 * y * y * Math.sin(4 * toRadDeg(L0))
+    - 1.25 * e * e * Math.sin(2 * Mrad)
+  );
+
+  const utcMinutes = date.getUTCHours() * 60 + date.getUTCMinutes() + date.getUTCSeconds() / 60;
+  let trueSolarTime = (utcMinutes + Eq + 4 * lon) % 1440;
+  if (trueSolarTime < 0) trueSolarTime += 1440;
+
+  let hourAngle = trueSolarTime / 4 - 180; // degrees from solar noon
+
+  const latRad = toRadDeg(lat);
+  const declRad = toRadDeg(decl);
+  const haRad = toRadDeg(hourAngle);
+
+  const elevation = toDegRad(Math.asin(
+    Math.sin(latRad) * Math.sin(declRad) + Math.cos(latRad) * Math.cos(declRad) * Math.cos(haRad)
+  ));
+
+  const azimuthRad = Math.atan2(
+    Math.sin(haRad),
+    Math.cos(haRad) * Math.sin(latRad) - Math.tan(declRad) * Math.cos(latRad)
+  );
+  const azimuth = (toDegRad(azimuthRad) + 180) % 360; // from south -> from true north, clockwise
+
+  return { elevation, azimuth };
+}
+
+function isGoldenHourElevation(elevDeg) {
+  return elevDeg >= GOLDEN_HOUR_MIN_ELEV_DEG && elevDeg <= GOLDEN_HOUR_MAX_ELEV_DEG;
+}
+
+// Golden hour has no simple closed-form start/end time (the elevation-vs-time curve isn't
+// analytically invertible here without a much heavier formula) -- sampling forward in
+// GOLDEN_HOUR_STEP_MS steps is simple, reliable, and cheap enough at a 1/minute recompute rate.
+function computeGoldenHourStatus(now, lat, lon) {
+  if (typeof lat !== 'number' || typeof lon !== 'number' || !Number.isFinite(lat) || !Number.isFinite(lon)) {
+    return { state: 'none' };
+  }
+
+  const nowMs = now.getTime();
+  const nowElev = solarPosition(now, lat, lon).elevation;
+
+  if (isGoldenHourElevation(nowElev)) {
+    for (let t = nowMs + GOLDEN_HOUR_STEP_MS; t - nowMs <= GOLDEN_HOUR_LOOKAHEAD_MS; t += GOLDEN_HOUR_STEP_MS) {
+      if (!isGoldenHourElevation(solarPosition(new Date(t), lat, lon).elevation)) {
+        return { state: 'active', minutes: Math.max(1, Math.round((t - nowMs) / 60000)) };
+      }
+    }
+    return { state: 'active', minutes: Math.round(GOLDEN_HOUR_LOOKAHEAD_MS / 60000) };
+  }
+
+  for (let t = nowMs + GOLDEN_HOUR_STEP_MS; t - nowMs <= GOLDEN_HOUR_LOOKAHEAD_MS; t += GOLDEN_HOUR_STEP_MS) {
+    if (isGoldenHourElevation(solarPosition(new Date(t), lat, lon).elevation)) {
+      const minutesUntil = Math.round((t - nowMs) / 60000);
+      if (t - nowMs > GOLDEN_HOUR_UPCOMING_MAX_MS) return { state: 'none' };
+      return { state: 'upcoming', minutes: minutesUntil };
+    }
+  }
+  return { state: 'none' };
+}
+
+function formatGoldenHourMinutes(totalMinutes) {
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  if (h > 0) return `${h}h ${String(m).padStart(2, '0')}m`;
+  return `${m} min`;
+}
+
+function updateGoldenHourIndicator() {
+  const $el = document.getElementById('goldenHourIndicator');
+  const $text = document.getElementById('goldenHourText');
+  if (!$el || !$text) return;
+  const status = (APT && typeof APT.lat === 'number' && typeof APT.lon === 'number')
+    ? computeGoldenHourStatus(new Date(), APT.lat, APT.lon)
+    : { state: 'none' };
+
+  if (status.state === 'active') {
+    $text.textContent = `Golden hour — ${formatGoldenHourMinutes(status.minutes)} left`;
+    $el.classList.add('show');
+  } else if (status.state === 'upcoming') {
+    $text.textContent = `Golden hour in ${formatGoldenHourMinutes(status.minutes)}`;
+    $el.classList.add('show');
+  } else {
+    $el.classList.remove('show');
+  }
+}
+
+let goldenHourTimer = null;
+function startGoldenHourUpdates() {
+  updateGoldenHourIndicator();
+  if (goldenHourTimer) clearInterval(goldenHourTimer);
+  goldenHourTimer = setInterval(updateGoldenHourIndicator, 60 * 1000);
 }
 
   let APP_STARTED = false;
@@ -2273,6 +2779,9 @@ function updateAirportHeader() {
   const $navRadarBtn = document.getElementById('navRadarBtn');
   const $navSettingsBtn = document.getElementById('navSettingsBtn');
   const $modeArrivalsBtn = document.getElementById('modeArrivalsBtn');
+  const $windSock = document.getElementById('windSock');
+  const $windSockArrow = document.getElementById('windSockArrow');
+  const $windSockLabel = document.getElementById('windSockLabel');
   const $modeDeparturesBtn = document.getElementById('modeDeparturesBtn');
   const $radarFilterBtns = Array.from(document.querySelectorAll('#radarFilterRow [data-radar-filter]'));
 
@@ -2345,6 +2854,119 @@ function updateAirportHeader() {
     }).join('');
   }
 
+  // ===== Wind direction indicator (METAR, top-right overlay on the Radar view) =====
+  // Purely a visual aid, same philosophy as the dashed runway-corridor lines above -- this NEVER
+  // feeds into predictRunwayForAircraft() or any other prediction logic, even though wind
+  // direction correlates with active runway in real life. Only ever reads METAR; never writes
+  // into any of the runway-prediction state.
+  //
+  // METAR reports update roughly hourly in real life, so this is polled far less often than the
+  // ADS-B feed (AUTO_REFRESH_MS, ~10s) -- and only while the Radar tab is actually the active tab,
+  // same lifecycle as the radar map itself (see setTabMode below).
+  const METAR_REFRESH_MS = 10 * 60 * 1000; // 10 min
+  const METAR_PROXY = './metar.php';
+  let metarTimer = null;
+  let metarInFlight = false;
+
+  // Extracts wind direction/speed from a raw METAR string's wind group, e.g. "24012KT",
+  // "01015G25KT", "VRB03KT". VRB (variable, light/no prevailing direction) has no single bearing
+  // to point a sock at, so it's treated the same as "no data" -- nothing renders rather than
+  // showing a misleadingly confident arrow.
+  function parseMetarWind(raw) {
+    if (typeof raw !== 'string') return null;
+    const m = raw.match(/\b(\d{3}|VRB)(\d{2,3})(?:G\d{2,3})?KT\b/);
+    if (!m || m[1] === 'VRB') return null;
+    const dir = parseInt(m[1], 10);
+    const speed = parseInt(m[2], 10);
+    if (!isFinite(dir) || !isFinite(speed)) return null;
+    return { dir, speed };
+  }
+
+  function extractMetarRaw(json) {
+    const entry = Array.isArray(json) ? json[0] : null;
+    if (!entry) return null;
+    return (typeof entry.rawOb === 'string' && entry.rawOb) ||
+      (typeof entry.raw_text === 'string' && entry.raw_text) || null;
+  }
+
+  // Direct browser fetch first (aviationweather.gov's public data API needs no key) -- falls back
+  // to metar.php only if that's blocked (e.g. no CORS headers on the upstream response).
+  async function fetchMetarWindDirect(icao) {
+    const url = `https://aviationweather.gov/api/data/metar?ids=${encodeURIComponent(icao)}&format=json`;
+    const resp = await fetch(url, { cache: 'no-store' });
+    if (!resp.ok) throw new Error(`METAR HTTP ${resp.status}`);
+    return parseMetarWind(extractMetarRaw(await resp.json()));
+  }
+
+  async function fetchMetarWindProxied(icao) {
+    const url = new URL(METAR_PROXY, location.href);
+    url.searchParams.set('ids', icao);
+    url.searchParams.set('_', String(Date.now()));
+    const resp = await fetch(url.toString(), { cache: 'no-store' });
+    if (!resp.ok) throw new Error(`METAR proxy HTTP ${resp.status}`);
+    return parseMetarWind(extractMetarRaw(await resp.json()));
+  }
+
+  async function fetchMetarWind(icao) {
+    try {
+      return await fetchMetarWindDirect(icao);
+    } catch (e) {
+      try {
+        return await fetchMetarWindProxied(icao);
+      } catch (e2) {
+        return null;
+      }
+    }
+  }
+
+  // Real airport windsock convention: the sock points in the direction the wind is blowing
+  // TOWARD (its open end faces away from the wind source), not the direction it's blowing FROM.
+  // METAR wind direction is always reported as the FROM bearing, so the icon is rotated to
+  // (dir + 180). The arrow art itself is drawn pointing up/north at rest, matching the same
+  // compass-degrees-as-CSS-rotation convention makeAircraftIcon() uses for aircraft headings.
+  function renderWindSock(wind) {
+    if (!$windSock) return;
+    if (!wind) {
+      $windSock.classList.remove('show');
+      return;
+    }
+    const towardDeg = (wind.dir + 180) % 360;
+    if ($windSockArrow) $windSockArrow.style.transform = `rotate(${towardDeg}deg)`;
+    if ($windSockLabel) $windSockLabel.textContent = `${wind.speed}kt`;
+    $windSock.setAttribute(
+      'aria-label',
+      `Wind from ${wind.dir}° at ${wind.speed} knots. Arrow points the direction the wind is blowing toward, like a windsock.`
+    );
+    $windSock.title = $windSock.getAttribute('aria-label');
+    $windSock.classList.add('show');
+  }
+
+  async function pollMetarWind() {
+    if (TAB_MODE !== 'radar' || metarInFlight) return;
+    const icao = (APT && APT.icao) ? String(APT.icao).toUpperCase() : '';
+    if (!icao) { renderWindSock(null); return; }
+    metarInFlight = true;
+    let wind = null;
+    try {
+      wind = await fetchMetarWind(icao);
+    } finally {
+      metarInFlight = false;
+    }
+    if (TAB_MODE !== 'radar') return; // tab may have changed while the fetch was in flight
+    renderWindSock(wind);
+  }
+
+  function startMetarPolling() {
+    stopMetarPolling();
+    pollMetarWind();
+    metarTimer = setInterval(pollMetarWind, METAR_REFRESH_MS);
+  }
+
+  function stopMetarPolling() {
+    if (metarTimer) { clearInterval(metarTimer); metarTimer = null; }
+    renderWindSock(null);
+  }
+
   // Bottom-nav Flights/Radar tab switch (formerly the header Cards/Radar toggle). Radar goes
   // full-screen (see .radarWrap.show), replacing the whole Flights-tab content area rather than
   // sitting alongside it.
@@ -2368,6 +2990,9 @@ function updateAirportHeader() {
           if (radarMap) radarMap.invalidateSize();
         });
       });
+      startMetarPolling();
+    } else {
+      stopMetarPolling();
     }
   }
 
@@ -2787,10 +3412,12 @@ function resetRunwayPredictionCaches() {
   bayEntryCache.clear();
   baySideHistoryCache.clear();
   geometryAgreementCache.clear();
+  archerfieldAgreementCache.clear();
   try { localStorage.removeItem(RUNWAY_LOCK_STORE_KEY); } catch {}
   try { localStorage.removeItem(BAY_ENTRY_STORE_KEY); } catch {}
   try { localStorage.removeItem(BAY_SIDE_HISTORY_STORE_KEY); } catch {}
   try { localStorage.removeItem(GEOMETRY_AGREEMENT_STORE_KEY); } catch {}
+  try { localStorage.removeItem(ARCHERFIELD_AGREEMENT_STORE_KEY); } catch {}
 }
 
 function applySelectedAirport(apt) {
@@ -2799,6 +3426,7 @@ function applySelectedAirport(apt) {
   APT = apt;
   saveAirport(apt);
   updateAirportHeader();
+  updateGoldenHourIndicator(); // sun position depends on APT.lat/lon, recompute for the new airport
   // Radar: re-center if map has been initialised
   try { radarRecenter(); } catch(e) {}
   return true;
@@ -3419,45 +4047,86 @@ function airlineNameFromFlight(flight) {
       const statusText = isLanding ? 'Landing' : 'Arriving';
       const tagClass = isLanding ? 'tag landing' : 'tag arriving';
 
-      // Runway label (appears inside 2nm). Once it hits high confidence, lock it and never downgrade.
+      // Runway label. Once it hits high confidence, lock it and never downgrade -- see
+      // isGeometryTrustworthyForLock's comment (near predictRunwayForAircraft) for what "hits
+      // high confidence" actually requires now (margin-decisive relative to the real runway
+      // separation, sustained over multiple polls, under an outer distance ceiling -- not just
+      // "close enough", which is what raw distance alone used to stand in for).
       const _rk = getRunwayCacheKey(it);
       if (_rk) activeKeys.add(_rk);
 
       let rwyInfo = null;
       const cached = _rk ? runwayLockCache.get(_rk) : null;
       if (cached && typeof cached.name === 'string' && cached.name) {
-        // Only show the cached runway if we are inside the display window (predictRunwayForAircraft handles that too,
-        // but we also gate here so we don't show runways outside 5nm).
-        if (typeof dnm === 'number' && dnm > 0 && (Math.round(dnm * 10) / 10) <= 2.0) {
-          rwyInfo = { name: cached.name, level: 'high' };
-        }
-      }
-
-      if (!rwyInfo) {
+        // Already locked at some prior poll -- isGeometryTrustworthyForLock has already vetted
+        // this, and runwayLockCache never downgrades once set, so there's no need to also wait
+        // for a specific distance (or to keep recomputing predictRunwayForAircraft every poll
+        // once the answer is locked in).
+        rwyInfo = { name: cached.name, level: 'high' };
+      } else {
         rwyInfo = predictRunwayForAircraft(it);
-        // Only lock the cache in close — 'high' confidence can now fire as far out as ~12nm
-        // (since the cross-track match runs at range too), but that early call can still be
-        // wrong if the aircraft hasn't fully converged onto its centerline yet. Caching it
-        // then would freeze a possibly-wrong answer for the rest of the approach. Locking
-        // only inside 3nm keeps the cache doing what it's actually for: stabilising the
-        // chip right at the point display starts (2nm), not "remembering" an early guess.
-        if (_rk && rwyInfo && rwyInfo.level === 'high' && !cached &&
-            typeof dnm === 'number' && dnm <= 3) {
+        // 'high' confidence can now fire as far out as ~12nm (since the cross-track match runs
+        // at range too), but that alone isn't enough to freeze a permanent answer -- an early
+        // 'high' can still be wrong if the aircraft hasn't actually converged onto its
+        // centerline yet. isGeometryTrustworthyForLock() (see its comment above, near
+        // predictRunwayForAircraft) is the actual gate: margin-decisive relative to the real
+        // runway separation, sustained over multiple polls, under an outer distance ceiling --
+        // replacing the old flat "dnm <= 3" rule. Checked independently here rather than
+        // trusting rwyInfo.level === 'high' alone, because predictRunwayForAircraft can also
+        // return a plain 'high' read that hasn't cleared that bar yet (e.g. when no bay-side
+        // estimate is available to prefer instead) -- only a result that actually clears
+        // isGeometryTrustworthyForLock should ever be written into runwayLockCache, which
+        // never downgrades once set. (`!cached` is implicit here -- this branch only runs when
+        // the cache lookup above found nothing.)
+        //
+        // isArcherfieldSustainedForLock (see its own comment above) is the equivalent gate for
+        // the Archerfield 01L/01R early-call rule, which never sets level: 'high' at all -- it
+        // has its own separate sustained-agreement streak (archerfieldAgreementCache), checked
+        // here as an OR alongside the cross-track gate rather than folded into it.
+        if (_rk && rwyInfo && isArcherfieldSustainedForLock(rwyInfo, dnm, _rk)) {
+          runwayLockCache.set(_rk, { name: rwyInfo.name, ts: Date.now() });
+          // Match the cached-branch display above ({ level: 'high' }) on the SAME poll the lock
+          // is written, rather than showing this poll's raw 'likely+' and only picking up 'high'
+          // styling on the next poll once the cache re-read above finds it -- purely cosmetic
+          // (the name/lock itself is identical either way), but avoids a one-poll flash of the
+          // wrong confidence styling on an otherwise-already-locked result.
+          rwyInfo = { name: rwyInfo.name, level: 'high' };
+        } else if (_rk && rwyInfo && isGeometryTrustworthyForLock(rwyInfo, dnm, _rk)) {
           runwayLockCache.set(_rk, { name: rwyInfo.name, ts: Date.now() });
         }
       }
 
-      // Conservative runway display: only show the RWY chip very close-in (<=2.0 nm) to avoid wrong side-calls.
-      // The spotting popup deliberately uses the *un-gated* value below — it already has its own "closed/missing
-      // primary spot" honesty built in, and a hint further out is more useful than none at all for planning a move.
-      // If the precise cross-track match above hasn't resolved (aircraft not yet converged onto either
-      // centerline — still on a STAR/vector routing), fall back to the broader relative-heading estimate.
-      // This never touches rwyInfo used for the chip below, only the raw values captured for the popup.
+      // Re-read the cache AFTER the possible write above, so a result that just became
+      // trustworthy-and-locked THIS poll is revealed immediately rather than waiting one more
+      // poll cycle for the cached-branch above to see it.
+      const lockedNow = _rk ? runwayLockCache.get(_rk) : null;
+      const isLocked = !!(lockedNow && typeof lockedNow.name === 'string' && lockedNow.name);
+
+      // Runway display: an ACTUALLY-LOCKED result is shown as soon as it locks, however far out
+      // that happens to be -- isGeometryTrustworthyForLock already did the work of deciding it's
+      // trustworthy (margin-decisive, sustained, under the outer ceiling), and it can never
+      // downgrade once set, so there's no "wrong-call" risk left to guard against by ALSO
+      // waiting for a fixed distance. This replaces the old flat "<=2.0nm" display cap, which
+      // was a blunt stand-in for trustworthiness from back when raw distance was the only signal
+      // available -- now that a principled one exists, gating the display on distance again on
+      // top of it just hides a result the system already trusts enough to act on internally.
+      //
+      // Anything NOT yet locked (a fresh, lower-confidence predictRunwayForAircraft result -- a
+      // bay estimate, 'likely+', 'guess', or even a 'high' geometry read that hasn't cleared the
+      // sustained-streak bar yet) keeps the ORIGINAL <=2.0nm cap unchanged -- still conservative
+      // for anything that hasn't cleared the stronger bar.
+      //
+      // The spotting popup deliberately uses the *un-gated* value below — it already has its own
+      // "closed/missing primary spot" honesty built in, and a hint further out is more useful
+      // than none at all for planning a move. If the precise cross-track match above hasn't
+      // resolved (aircraft not yet converged onto either centerline — still on a STAR/vector
+      // routing), fall back to the broader relative-heading estimate. This never touches rwyInfo
+      // used for the chip below, only the raw values captured for the popup.
       const rwyInfoForPopup = rwyInfo || estimateNorthFamilyEarly(it);
       const rawRwy = rwyInfoForPopup ? rwyInfoForPopup.name : null;
       const rawRwyLevel = rwyInfoForPopup ? rwyInfoForPopup.level : null;
       const _dnm1 = (typeof dnm === 'number' && isFinite(dnm)) ? (Math.round(dnm * 10) / 10) : null;
-      if (!(_dnm1 != null && _dnm1 <= 2.0)) {
+      if (!isLocked && !(_dnm1 != null && _dnm1 <= 2.0)) {
         rwyInfo = null;
       }
 
@@ -3614,10 +4283,12 @@ function airlineNameFromFlight(flight) {
     pruneBayEntryCache(activeKeys);
     pruneBaySideHistoryCache(activeKeys);
     pruneGeometryAgreementCache(activeKeys);
+    pruneArcherfieldAgreementCache(activeKeys);
     saveRunwayLockCache();
     saveBayEntryCache();
     saveBaySideHistoryCache();
     saveGeometryAgreementCache();
+    saveArcherfieldAgreementCache();
   }
 
   // Departures card renderer -- separate from render() above (which stays the arrivals path,
@@ -4621,6 +5292,10 @@ if ($closeSavedBtn) $closeSavedBtn.addEventListener('click', closeSavedModal);
   if (AUTO_REFRESH_MS > 0) {
     scheduleNextAutoRefresh();
   }
+
+  // Golden-hour indicator: pure local computation, independent of the ADS-B refresh cycle and
+  // not gated to any particular tab (unlike the wind sock, which costs a network call).
+  startGoldenHourUpdates();
 // ===== Service Worker =====
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', async () => {
