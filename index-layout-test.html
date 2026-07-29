@@ -848,7 +848,6 @@
   // set the proxy filename here to match what exists on the server.
   // It will auto-fallback between proxy.php and proxy.php.
   const PROXY_CANDIDATES = ['./proxy.php'];
-  const ROUTE_PROXY = './routeset.php';
 
   // Airports (AU + NZ) – lightweight built-in list
 const AIRPORTS = [
@@ -4625,56 +4624,39 @@ function airlineNameFromFlight(flight) {
   // Callsign -> { origin, destination } | { miss: true }. A flight number's route doesn't
   // change mid-flight, so this is cached indefinitely per session (misses too, so we don't
   // re-query GA/unmatched callsigns every refresh cycle).
+  // Fetched directly from the browser (adsbdb.com is a free, public, no-key API -- same
+  // approach as the Planespotters photo lookup above), one GET per new callsign.
   const routeCache = new Map();
 
-  async function fetchRoutes(list) {
-    const planes = [];
-    const seen = new Set();
-    for (const p of list) {
-      const cs = (p.flight || '').trim();
-      if (!cs || seen.has(cs) || routeCache.has(cs)) continue;
-      seen.add(cs);
-      if (typeof p.lat === 'number' && typeof p.lon === 'number') {
-        planes.push({ callsign: cs, lat: p.lat, lng: p.lon });
-      }
-    }
-    if (!planes.length) return;
-
-    const resp = await fetch(ROUTE_PROXY, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ planes }),
-      cache: 'no-store',
-    });
-    if (!resp.ok) throw new Error(`Route proxy HTTP ${resp.status}`);
-    const json = await resp.json();
-    const arr = Array.isArray(json) ? json : [];
-
-    const resolved = new Set();
-    for (const entry of arr) {
-      const cs = (entry && entry.callsign ? String(entry.callsign) : '').trim();
-      if (!cs) continue;
-      resolved.add(cs);
-      let origin = null, destination = null;
-      const airports = entry && Array.isArray(entry._airports) ? entry._airports : null;
-      if (airports && airports.length === 2) {
-        origin = airports[0].icao || airports[0].icao_code || null;
-        destination = airports[1].icao || airports[1].icao_code || null;
-      }
-      if ((!origin || !destination) && entry && typeof entry.airport_codes === 'string') {
-        const parts = entry.airport_codes.split('-');
-        if (parts.length === 2 && parts[0] && parts[1]) { origin = parts[0]; destination = parts[1]; }
-      }
-      if (entry && entry.plausible && origin && destination) {
+  async function fetchOneRoute(cs) {
+    try {
+      const resp = await fetch(`https://api.adsbdb.com/v0/callsign/${encodeURIComponent(cs)}`, { cache: 'no-store' });
+      if (!resp.ok) { routeCache.set(cs, { miss: true }); return; }
+      const json = await resp.json();
+      const fr = json && json.response && typeof json.response === 'object' ? json.response.flightroute : null;
+      const origin = fr && fr.origin && fr.origin.icao_code ? String(fr.origin.icao_code) : null;
+      const destination = fr && fr.destination && fr.destination.icao_code ? String(fr.destination.icao_code) : null;
+      if (origin && destination) {
         routeCache.set(cs, { origin, destination });
       } else {
         routeCache.set(cs, { miss: true });
       }
+    } catch (e) {
+      routeCache.set(cs, { miss: true });
     }
-    // Anything we asked for but got no entry back for is also a miss (nothing to retry on).
-    for (const cs of seen) {
-      if (!resolved.has(cs)) routeCache.set(cs, { miss: true });
+  }
+
+  async function fetchRoutes(list) {
+    const seen = new Set();
+    const toFetch = [];
+    for (const p of list) {
+      const cs = (p.flight || '').trim();
+      if (!cs || seen.has(cs) || routeCache.has(cs)) continue;
+      seen.add(cs);
+      toFetch.push(cs);
     }
+    if (!toFetch.length) return;
+    await Promise.all(toFetch.map(fetchOneRoute));
   }
 
   function computeEtaMin(distNm, gsKt) {
