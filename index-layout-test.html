@@ -276,6 +276,20 @@
   .statusChip.sc-est{ color:var(--text-3); }
   .statusChip.sc-est .scDot{ background:var(--text-3); }
 
+  /* Golden-hour indicator (Flights tab header, below the airport sub-line) -- same compact
+     dot+text shape as .statusChip above, permanently warm/amber (--warn) rather than switching
+     color by state, since "showing at all" already implies the warm-light state is relevant.
+     Hidden by default; JS toggles `.show` only when golden hour is either active or starting
+     within the next ~2 hours, so it silently disappears the rest of the day instead of showing
+     a stale/irrelevant computation. */
+  .goldenHourChip{
+    display:none; align-items:center; gap:6px;
+    font-size:11.5px; font-weight:600; color:var(--warn);
+    margin-top:4px;
+  }
+  .goldenHourChip.show{ display:inline-flex; }
+  .ghDot{ width:7px; height:7px; border-radius:50%; background:var(--warn); flex:0 0 auto; }
+
   /* ---------- Hero card (first item in the current list) ---------- */
   .heroBlock{ display:flex; flex-direction:column; gap:8px; }
   .heroLabel{
@@ -644,6 +658,7 @@
         <div>
           <h1>Shot Log</h1>
           <div class="sub">Arriving Soon – <span id="aptName">Brisbane</span> (<span id="aptIcao">YBBN</span>)</div>
+          <div id="goldenHourIndicator" class="goldenHourChip"><span class="ghDot"></span><span id="goldenHourText"></span></div>
         </div>
       </div>
     </div>
@@ -2394,6 +2409,156 @@ function updateAirportHeader() {
   if ($icao) $icao.textContent = APT.icao || "";
 }
 
+// ===== Golden-hour indicator (Flights tab header) =====
+// Pure local computation (standard low-precision solar position algorithm, Meeus/NOAA formulas)
+// -- no external API, no network cost, so unlike the wind sock this isn't gated to a specific
+// tab or throttled beyond "recompute about once a minute".
+
+// Golden hour ~= sun elevation in [-4deg, 6deg], covering both the "sun near/just above the
+// horizon" morning and evening windows in one band (some definitions split "blue hour" and
+// "golden hour" into separate narrower bands; this app only needs a single practical window for
+// "the light is warm/low and interesting for spotting").
+const GOLDEN_HOUR_MIN_ELEV_DEG = -4;
+const GOLDEN_HOUR_MAX_ELEV_DEG = 6;
+
+// How far ahead to look for an upcoming window, and to search for when an active one ends.
+// 3 hours comfortably covers the "starts within ~2 hours" display threshold with margin to
+// spare, without the lookahead loop running unnecessarily far past what's ever displayed.
+const GOLDEN_HOUR_LOOKAHEAD_MS = 3 * 60 * 60 * 1000;
+const GOLDEN_HOUR_UPCOMING_MAX_MS = 2 * 60 * 60 * 1000;
+const GOLDEN_HOUR_STEP_MS = 60 * 1000;
+
+function toRadDeg(deg) { return deg * Math.PI / 180; }
+function toDegRad(rad) { return rad * 180 / Math.PI; }
+
+// Sun elevation (and azimuth, from true north, clockwise) for a given instant and lat/lon.
+// Standard low-precision solar position algorithm (Jean Meeus' "Astronomical Algorithms" /
+// the same formulas behind NOAA's public solar calculator) -- accurate to a small fraction of a
+// degree, which is far tighter than this feature needs (the golden-hour band itself is 10deg
+// wide).
+function solarPosition(date, lat, lon) {
+  const JD = date.getTime() / 86400000 + 2440587.5; // Julian day (UTC)
+  const T = (JD - 2451545.0) / 36525; // Julian centuries since J2000.0
+
+  const L0 = (280.46646 + T * (36000.76983 + T * 0.0003032)) % 360; // geometric mean longitude
+  const M = 357.52911 + T * (35999.05029 - 0.0001537 * T); // geometric mean anomaly
+  const e = 0.016708634 - T * (0.000042037 + 0.0000001267 * T); // eccentricity of Earth's orbit
+
+  const Mrad = toRadDeg(M);
+  const C = Math.sin(Mrad) * (1.914602 - T * (0.004817 + 0.000014 * T))
+    + Math.sin(2 * Mrad) * (0.019993 - 0.000101 * T)
+    + Math.sin(3 * Mrad) * 0.000289; // equation of center
+
+  const trueLong = L0 + C;
+  const omega = 125.04 - 1934.136 * T;
+  const lambda = trueLong - 0.00569 - 0.00478 * Math.sin(toRadDeg(omega)); // apparent longitude
+
+  const seconds = 21.448 - T * (46.8150 + T * (0.00059 - T * 0.001813));
+  const e0 = 23 + (26 + seconds / 60) / 60; // mean obliquity of the ecliptic
+  const eCorr = e0 + 0.00256 * Math.cos(toRadDeg(omega)); // corrected for nutation
+
+  const decl = toDegRad(Math.asin(Math.sin(toRadDeg(eCorr)) * Math.sin(toRadDeg(lambda))));
+
+  // Equation of time, in minutes.
+  const y = Math.pow(Math.tan(toRadDeg(eCorr) / 2), 2);
+  const Eq = 4 * toDegRad(
+    y * Math.sin(2 * toRadDeg(L0))
+    - 2 * e * Math.sin(Mrad)
+    + 4 * e * y * Math.sin(Mrad) * Math.cos(2 * toRadDeg(L0))
+    - 0.5 * y * y * Math.sin(4 * toRadDeg(L0))
+    - 1.25 * e * e * Math.sin(2 * Mrad)
+  );
+
+  const utcMinutes = date.getUTCHours() * 60 + date.getUTCMinutes() + date.getUTCSeconds() / 60;
+  let trueSolarTime = (utcMinutes + Eq + 4 * lon) % 1440;
+  if (trueSolarTime < 0) trueSolarTime += 1440;
+
+  let hourAngle = trueSolarTime / 4 - 180; // degrees from solar noon
+
+  const latRad = toRadDeg(lat);
+  const declRad = toRadDeg(decl);
+  const haRad = toRadDeg(hourAngle);
+
+  const elevation = toDegRad(Math.asin(
+    Math.sin(latRad) * Math.sin(declRad) + Math.cos(latRad) * Math.cos(declRad) * Math.cos(haRad)
+  ));
+
+  const azimuthRad = Math.atan2(
+    Math.sin(haRad),
+    Math.cos(haRad) * Math.sin(latRad) - Math.tan(declRad) * Math.cos(latRad)
+  );
+  const azimuth = (toDegRad(azimuthRad) + 180) % 360; // from south -> from true north, clockwise
+
+  return { elevation, azimuth };
+}
+
+function isGoldenHourElevation(elevDeg) {
+  return elevDeg >= GOLDEN_HOUR_MIN_ELEV_DEG && elevDeg <= GOLDEN_HOUR_MAX_ELEV_DEG;
+}
+
+// Golden hour has no simple closed-form start/end time (the elevation-vs-time curve isn't
+// analytically invertible here without a much heavier formula) -- sampling forward in
+// GOLDEN_HOUR_STEP_MS steps is simple, reliable, and cheap enough at a 1/minute recompute rate.
+function computeGoldenHourStatus(now, lat, lon) {
+  if (typeof lat !== 'number' || typeof lon !== 'number' || !Number.isFinite(lat) || !Number.isFinite(lon)) {
+    return { state: 'none' };
+  }
+
+  const nowMs = now.getTime();
+  const nowElev = solarPosition(now, lat, lon).elevation;
+
+  if (isGoldenHourElevation(nowElev)) {
+    for (let t = nowMs + GOLDEN_HOUR_STEP_MS; t - nowMs <= GOLDEN_HOUR_LOOKAHEAD_MS; t += GOLDEN_HOUR_STEP_MS) {
+      if (!isGoldenHourElevation(solarPosition(new Date(t), lat, lon).elevation)) {
+        return { state: 'active', minutes: Math.max(1, Math.round((t - nowMs) / 60000)) };
+      }
+    }
+    return { state: 'active', minutes: Math.round(GOLDEN_HOUR_LOOKAHEAD_MS / 60000) };
+  }
+
+  for (let t = nowMs + GOLDEN_HOUR_STEP_MS; t - nowMs <= GOLDEN_HOUR_LOOKAHEAD_MS; t += GOLDEN_HOUR_STEP_MS) {
+    if (isGoldenHourElevation(solarPosition(new Date(t), lat, lon).elevation)) {
+      const minutesUntil = Math.round((t - nowMs) / 60000);
+      if (t - nowMs > GOLDEN_HOUR_UPCOMING_MAX_MS) return { state: 'none' };
+      return { state: 'upcoming', minutes: minutesUntil };
+    }
+  }
+  return { state: 'none' };
+}
+
+function formatGoldenHourMinutes(totalMinutes) {
+  const h = Math.floor(totalMinutes / 60);
+  const m = totalMinutes % 60;
+  if (h > 0) return `${h}h ${String(m).padStart(2, '0')}m`;
+  return `${m} min`;
+}
+
+function updateGoldenHourIndicator() {
+  const $el = document.getElementById('goldenHourIndicator');
+  const $text = document.getElementById('goldenHourText');
+  if (!$el || !$text) return;
+  const status = (APT && typeof APT.lat === 'number' && typeof APT.lon === 'number')
+    ? computeGoldenHourStatus(new Date(), APT.lat, APT.lon)
+    : { state: 'none' };
+
+  if (status.state === 'active') {
+    $text.textContent = `Golden hour — ${formatGoldenHourMinutes(status.minutes)} left`;
+    $el.classList.add('show');
+  } else if (status.state === 'upcoming') {
+    $text.textContent = `Golden hour in ${formatGoldenHourMinutes(status.minutes)}`;
+    $el.classList.add('show');
+  } else {
+    $el.classList.remove('show');
+  }
+}
+
+let goldenHourTimer = null;
+function startGoldenHourUpdates() {
+  updateGoldenHourIndicator();
+  if (goldenHourTimer) clearInterval(goldenHourTimer);
+  goldenHourTimer = setInterval(updateGoldenHourIndicator, 60 * 1000);
+}
+
   let APP_STARTED = false;
 
   const LIMITS = {
@@ -3261,6 +3426,7 @@ function applySelectedAirport(apt) {
   APT = apt;
   saveAirport(apt);
   updateAirportHeader();
+  updateGoldenHourIndicator(); // sun position depends on APT.lat/lon, recompute for the new airport
   // Radar: re-center if map has been initialised
   try { radarRecenter(); } catch(e) {}
   return true;
@@ -5126,6 +5292,10 @@ if ($closeSavedBtn) $closeSavedBtn.addEventListener('click', closeSavedModal);
   if (AUTO_REFRESH_MS > 0) {
     scheduleNextAutoRefresh();
   }
+
+  // Golden-hour indicator: pure local computation, independent of the ADS-B refresh cycle and
+  // not gated to any particular tab (unlike the wind sock, which costs a network call).
+  startGoldenHourUpdates();
 // ===== Service Worker =====
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', async () => {
