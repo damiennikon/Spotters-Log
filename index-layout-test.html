@@ -848,7 +848,6 @@
   // set the proxy filename here to match what exists on the server.
   // It will auto-fallback between proxy.php and proxy.php.
   const PROXY_CANDIDATES = ['./proxy.php'];
-  const ROUTE_PROXY = './routeset.php';
 
   // Airports (AU + NZ) – lightweight built-in list
 const AIRPORTS = [
@@ -4576,7 +4575,17 @@ function airlineNameFromFlight(flight) {
     url.searchParams.set('dist_nm', String(LIMITS.maxNM));
     url.searchParams.set('_', String(Date.now())); // cache bust
 
-    const resp = await fetch(url.toString(), { cache: 'no-store' });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 9000);
+    let resp;
+    try {
+      resp = await fetch(url.toString(), { cache: 'no-store', signal: controller.signal });
+    } catch (e) {
+      if (e && e.name === 'AbortError') throw new Error(`Proxy timeout after 9s at ${proxyPath}`);
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
     if (!resp.ok) {
       const t = await resp.text().catch(()=>'');
       // Full raw body always goes to console for debugging; the UI only ever shows a clean message.
@@ -4625,56 +4634,82 @@ function airlineNameFromFlight(flight) {
   // Callsign -> { origin, destination } | { miss: true }. A flight number's route doesn't
   // change mid-flight, so this is cached indefinitely per session (misses too, so we don't
   // re-query GA/unmatched callsigns every refresh cycle).
+  // Fetched directly from the browser (adsbdb.com is a free, public, no-key API -- same
+  // approach as the Planespotters photo lookup above), one GET per new callsign.
+  //
+  // LICENSE NOTE: adsbdb.com's route data may not be copied, republished, or incorporated
+  // into another database without the maintainer's permission. routeCache is a session-only
+  // lookup cache for display purposes -- never persist it, and never let origin/destination
+  // reach saveShotFromAircraft's saved-shot object or exportSavedShots' export (see the
+  // guardrail comments on those two functions below).
   const routeCache = new Map();
 
+  // Single combined request per aircraft: /v0/aircraft/{mode_s}?callsign={cs} returns both
+  // aircraft info and flightroute in one call (and degrades gracefully to aircraft-only if the
+  // callsign isn't recognized), halving requests versus the old callsign-only endpoint.
+  async function fetchAdsbdbFlightroute(hex, cs) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 2500);
+    try {
+      const resp = await fetch(`https://api.adsbdb.com/v0/aircraft/${encodeURIComponent(hex)}?callsign=${encodeURIComponent(cs)}`, { cache: 'no-store', signal: controller.signal });
+      if (!resp.ok) return null;
+      const json = await resp.json();
+      const fr = json && json.response && typeof json.response === 'object' ? json.response.flightroute : null;
+      const origin = fr && fr.origin && fr.origin.icao_code ? String(fr.origin.icao_code) : null;
+      const destination = fr && fr.destination && fr.destination.icao_code ? String(fr.destination.icao_code) : null;
+      return (origin && destination) ? { origin, destination } : null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  // Second-chance source, tried only when adsbdb.com misses -- adsbdb's community-maintained
+  // dataset has real coverage gaps (esp. AU regional turboprop routes), separate from any
+  // callsign-matching issue. Free, no key, ~1000 req/5min. Response: { flight, route: "ORIG-DEST" }.
+  async function fetchHexdbFlightroute(cs) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 2500);
+    try {
+      const resp = await fetch(`https://hexdb.io/api/v1/route/icao/${encodeURIComponent(cs)}`, { cache: 'no-store', signal: controller.signal });
+      if (!resp.ok) return null;
+      const json = await resp.json();
+      const route = json && typeof json.route === 'string' ? json.route : '';
+      const parts = route.split('-');
+      // Multi-leg routes (e.g. "MMMX-KDFW-EDDF") -- first leg's origin, last leg's destination.
+      return (parts.length >= 2 && parts[0] && parts[parts.length - 1]) ? { origin: parts[0], destination: parts[parts.length - 1] } : null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  async function fetchOneRoute(hex, cs) {
+    try {
+      if (!hex) { routeCache.set(cs, { miss: true }); return; }
+      let fr = await fetchAdsbdbFlightroute(hex, cs).catch(() => null);
+      if (!fr) {
+        // adsbdb.com may not recognize a trailing codeshare/split-leg suffix letter (e.g.
+        // QLK369D) even when the base flight number (QLK369) is known -- retry once without it.
+        const suffixMatch = cs.match(/^([A-Za-z]{2,4}\d{1,4})[A-Za-z]$/);
+        if (suffixMatch) fr = await fetchAdsbdbFlightroute(hex, suffixMatch[1]).catch(() => null);
+      }
+      if (!fr) fr = await fetchHexdbFlightroute(cs).catch(() => null);
+      routeCache.set(cs, fr || { miss: true });
+    } catch (e) {
+      routeCache.set(cs, { miss: true });
+    }
+  }
+
   async function fetchRoutes(list) {
-    const planes = [];
     const seen = new Set();
+    const toFetch = [];
     for (const p of list) {
       const cs = (p.flight || '').trim();
       if (!cs || seen.has(cs) || routeCache.has(cs)) continue;
       seen.add(cs);
-      if (typeof p.lat === 'number' && typeof p.lon === 'number') {
-        planes.push({ callsign: cs, lat: p.lat, lng: p.lon });
-      }
+      toFetch.push({ cs, hex: (p.hex || '').toString().trim() });
     }
-    if (!planes.length) return;
-
-    const resp = await fetch(ROUTE_PROXY, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ planes }),
-      cache: 'no-store',
-    });
-    if (!resp.ok) throw new Error(`Route proxy HTTP ${resp.status}`);
-    const json = await resp.json();
-    const arr = Array.isArray(json) ? json : [];
-
-    const resolved = new Set();
-    for (const entry of arr) {
-      const cs = (entry && entry.callsign ? String(entry.callsign) : '').trim();
-      if (!cs) continue;
-      resolved.add(cs);
-      let origin = null, destination = null;
-      const airports = entry && Array.isArray(entry._airports) ? entry._airports : null;
-      if (airports && airports.length === 2) {
-        origin = airports[0].icao || airports[0].icao_code || null;
-        destination = airports[1].icao || airports[1].icao_code || null;
-      }
-      if ((!origin || !destination) && entry && typeof entry.airport_codes === 'string') {
-        const parts = entry.airport_codes.split('-');
-        if (parts.length === 2 && parts[0] && parts[1]) { origin = parts[0]; destination = parts[1]; }
-      }
-      if (entry && entry.plausible && origin && destination) {
-        routeCache.set(cs, { origin, destination });
-      } else {
-        routeCache.set(cs, { miss: true });
-      }
-    }
-    // Anything we asked for but got no entry back for is also a miss (nothing to retry on).
-    for (const cs of seen) {
-      if (!resolved.has(cs)) routeCache.set(cs, { miss: true });
-    }
+    if (!toFetch.length) return;
+    await Promise.all(toFetch.map(({ cs, hex }) => fetchOneRoute(hex, cs)));
   }
 
   function computeEtaMin(distNm, gsKt) {
@@ -4742,7 +4777,10 @@ function airlineNameFromFlight(flight) {
       // cards closed at that moment.
       const departuresFiltered = classifyDepartures(ac).slice(0, LIMITS.maxResults);
 
-      await fetchRoutes([...filtered, ...departuresFiltered]).catch((e) => { console.error('Route lookup failed', e); });
+      // Fire-and-forget: don't block rendering on route lookups. Whatever's already in
+      // routeCache (from a previous poll) is used below immediately; callsigns kicked off
+      // here populate the cache for the NEXT poll, not this one.
+      fetchRoutes([...filtered, ...departuresFiltered]).catch((e) => { console.error('Route lookup failed', e); });
       for (const p of [...filtered, ...departuresFiltered]) {
         const cs = (p.flight || '').trim();
         const r = cs ? routeCache.get(cs) : null;
@@ -5065,6 +5103,10 @@ let savedShots = sanitizeSavedShots(loadSaved());
     });
   }
 
+  // LICENSE GUARDRAIL: adsbdb.com's route data (routeCache / _route: origin, destination) must
+  // NEVER be added to the saved-shot object below. adsbdb.com's license forbids copying,
+  // publishing, or incorporating its route data into another database -- it's display-only,
+  // session-cache only. Persisting it here (even as a plain ICAO string) would violate that.
   function saveShotFromAircraft(it, kind) {
     if (!it) return;
     const isDeparture = kind === 'departure';
@@ -5233,6 +5275,9 @@ if ($closeSavedBtn) $closeSavedBtn.addEventListener('click', closeSavedModal);
 
   function pad2(n) { return String(n).padStart(2, '0'); }
 
+  // LICENSE GUARDRAIL: same restriction as saveShotFromAircraft above -- adsbdb.com's route
+  // data (origin/destination) must NEVER be added to the exported records below. It isn't in
+  // the saved-shot object in the first place, so there's nothing to spread here; keep it that way.
   function exportSavedShots() {
     if (!Array.isArray(savedShots) || savedShots.length === 0) {
       showToast('No saved shots to export');
