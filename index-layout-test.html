@@ -4575,7 +4575,17 @@ function airlineNameFromFlight(flight) {
     url.searchParams.set('dist_nm', String(LIMITS.maxNM));
     url.searchParams.set('_', String(Date.now())); // cache bust
 
-    const resp = await fetch(url.toString(), { cache: 'no-store' });
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 9000);
+    let resp;
+    try {
+      resp = await fetch(url.toString(), { cache: 'no-store', signal: controller.signal });
+    } catch (e) {
+      if (e && e.name === 'AbortError') throw new Error(`Proxy timeout after 9s at ${proxyPath}`);
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
     if (!resp.ok) {
       const t = await resp.text().catch(()=>'');
       // Full raw body always goes to console for debugging; the UI only ever shows a clean message.
@@ -4638,25 +4648,38 @@ function airlineNameFromFlight(flight) {
   // aircraft info and flightroute in one call (and degrades gracefully to aircraft-only if the
   // callsign isn't recognized), halving requests versus the old callsign-only endpoint.
   async function fetchAdsbdbFlightroute(hex, cs) {
-    const resp = await fetch(`https://api.adsbdb.com/v0/aircraft/${encodeURIComponent(hex)}?callsign=${encodeURIComponent(cs)}`, { cache: 'no-store' });
-    if (!resp.ok) return null;
-    const json = await resp.json();
-    const fr = json && json.response && typeof json.response === 'object' ? json.response.flightroute : null;
-    const origin = fr && fr.origin && fr.origin.icao_code ? String(fr.origin.icao_code) : null;
-    const destination = fr && fr.destination && fr.destination.icao_code ? String(fr.destination.icao_code) : null;
-    return (origin && destination) ? { origin, destination } : null;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 2500);
+    try {
+      const resp = await fetch(`https://api.adsbdb.com/v0/aircraft/${encodeURIComponent(hex)}?callsign=${encodeURIComponent(cs)}`, { cache: 'no-store', signal: controller.signal });
+      if (!resp.ok) return null;
+      const json = await resp.json();
+      const fr = json && json.response && typeof json.response === 'object' ? json.response.flightroute : null;
+      const origin = fr && fr.origin && fr.origin.icao_code ? String(fr.origin.icao_code) : null;
+      const destination = fr && fr.destination && fr.destination.icao_code ? String(fr.destination.icao_code) : null;
+      return (origin && destination) ? { origin, destination } : null;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   // Second-chance source, tried only when adsbdb.com misses -- adsbdb's community-maintained
   // dataset has real coverage gaps (esp. AU regional turboprop routes), separate from any
   // callsign-matching issue. Free, no key, ~1000 req/5min. Response: { flight, route: "ORIG-DEST" }.
   async function fetchHexdbFlightroute(cs) {
-    const resp = await fetch(`https://hexdb.io/api/v1/route/icao/${encodeURIComponent(cs)}`, { cache: 'no-store' });
-    if (!resp.ok) return null;
-    const json = await resp.json();
-    const route = json && typeof json.route === 'string' ? json.route : '';
-    const parts = route.split('-');
-    return (parts.length === 2 && parts[0] && parts[1]) ? { origin: parts[0], destination: parts[1] } : null;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 2500);
+    try {
+      const resp = await fetch(`https://hexdb.io/api/v1/route/icao/${encodeURIComponent(cs)}`, { cache: 'no-store', signal: controller.signal });
+      if (!resp.ok) return null;
+      const json = await resp.json();
+      const route = json && typeof json.route === 'string' ? json.route : '';
+      const parts = route.split('-');
+      // Multi-leg routes (e.g. "MMMX-KDFW-EDDF") -- first leg's origin, last leg's destination.
+      return (parts.length >= 2 && parts[0] && parts[parts.length - 1]) ? { origin: parts[0], destination: parts[parts.length - 1] } : null;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   async function fetchOneRoute(hex, cs) {
@@ -4754,7 +4777,10 @@ function airlineNameFromFlight(flight) {
       // cards closed at that moment.
       const departuresFiltered = classifyDepartures(ac).slice(0, LIMITS.maxResults);
 
-      await fetchRoutes([...filtered, ...departuresFiltered]).catch((e) => { console.error('Route lookup failed', e); });
+      // Fire-and-forget: don't block rendering on route lookups. Whatever's already in
+      // routeCache (from a previous poll) is used below immediately; callsigns kicked off
+      // here populate the cache for the NEXT poll, not this one.
+      fetchRoutes([...filtered, ...departuresFiltered]).catch((e) => { console.error('Route lookup failed', e); });
       for (const p of [...filtered, ...departuresFiltered]) {
         const cs = (p.flight || '').trim();
         const r = cs ? routeCache.get(cs) : null;
