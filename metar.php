@@ -1,5 +1,5 @@
 <?php
-// Fallback only -- the Radar view's wind indicator (index-layout-test.html) tries a direct
+// Fallback only -- the Radar view's wind indicator (index.html) tries a direct
 // browser fetch to aviationweather.gov first, and only ever calls this if that's blocked (e.g.
 // no CORS headers on the upstream response). Same pattern as proxy.php.
 header("Access-Control-Allow-Origin: *");
