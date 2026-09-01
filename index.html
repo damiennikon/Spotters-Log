@@ -3046,11 +3046,13 @@ function startGoldenHourUpdates() {
     }).setView(center, 9);
 
     // CARTO basemap API key (removes the "no key" watermark on the tiles below).
-    // Per CARTO's documented tile-URL format, passed as the `api_key` query parameter.
+    // Per CARTO's documented tile-URL format, passed as the `key` query parameter
+    // (NOT `api_key` -- that name is silently ignored by the tile server).
     const CARTO_API_KEY = 'cb1_2lrw_1_3514937bc4045b3dc1f8f3fb';
 
-    // CartoDB Dark Matter tiles (built from OSM data; free).
-    L.tileLayer(`https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?api_key=${CARTO_API_KEY}`, {
+    // CartoDB Dark Matter tiles (built from OSM data; free). No {s} subdomain
+    // sharding -- CARTO's current docs serve this endpoint from a single host.
+    L.tileLayer(`https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?key=${CARTO_API_KEY}`, {
       maxZoom: 20,
       minZoom: 5,
       attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
