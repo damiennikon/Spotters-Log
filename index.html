@@ -3055,7 +3055,12 @@ function startGoldenHourUpdates() {
     L.tileLayer(`https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?key=${CARTO_API_KEY}`, {
       maxZoom: 20,
       minZoom: 5,
-      attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+      // Aircraft positions come from adsb.lol (ODbL 1.0, which requires
+      // attribution) via proxy.php/routeset.php -- added here rather than a
+      // separate credits screen since this is the one place a user would
+      // already look for data-source credit, and it's what OSM's own tile
+      // policy expects for the basemap too.
+      attribution: '&copy; OpenStreetMap contributors &copy; CARTO &middot; Aircraft data <a href="https://adsb.lol" target="_blank" rel="noopener">adsb.lol</a> (ODbL)'
     }).addTo(radarMap);
 
     // 30nm ring around selected airport
@@ -4560,8 +4565,11 @@ function airlineNameFromFlight(flight) {
       const attr = wrap.querySelector('.acPhotoAttr');
       img.src = photo.src;
       if (photo.photographer) {
-        img.alt = `Photo: ${photo.photographer}`;
-        attr.textContent = `Photo: ${photo.photographer}`;
+        // Planespotters' Terms of Use ask for a "© <name>" credit (plus the
+        // link already applied via wrap.href below) -- this used to read
+        // "Photo: <name>", which doesn't match their requested format.
+        img.alt = `© ${photo.photographer}`;
+        attr.textContent = `© ${photo.photographer}`;
         attr.style.display = '';
       } else {
         img.alt = '';

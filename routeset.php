@@ -3,10 +3,16 @@
 // error_log redirection never applies here. Failures are logged explicitly below via
 // error_log() so they land in PHP's own error log instead of vanishing.
 
-header("Access-Control-Allow-Origin: *");
+require_once __DIR__ . '/shotlog-guard.php';
+
+// See proxy.php for why this exists: same open-relay concern, same
+// best-effort mitigation (origin/referer check + a per-IP rate limit).
+header("Access-Control-Allow-Origin: https://airscapephotos.com");
 header("Access-Control-Allow-Methods: POST, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type");
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { exit; }
+
+shotlog_guard('routeset', 60, 30); // matches proxy.php's limit -- called on the same refresh cycle
 
 header("Content-Type: application/json; charset=utf-8");
 

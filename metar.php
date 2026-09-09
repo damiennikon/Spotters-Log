@@ -2,10 +2,16 @@
 // Fallback only -- the Radar view's wind indicator (index.html) tries a direct
 // browser fetch to aviationweather.gov first, and only ever calls this if that's blocked (e.g.
 // no CORS headers on the upstream response). Same pattern as proxy.php.
-header("Access-Control-Allow-Origin: *");
+require_once __DIR__ . '/shotlog-guard.php';
+
+// See proxy.php for why this exists: same open-relay concern, same
+// best-effort mitigation (origin/referer check + a per-IP rate limit).
+header("Access-Control-Allow-Origin: https://airscapephotos.com");
 header("Access-Control-Allow-Methods: GET, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type");
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { exit; }
+
+shotlog_guard('metar', 20, 600); // this view polls every 10 min, so 20 requests / 10 min per IP comfortably covers several tabs
 
 $ids = strtoupper(trim($_GET['ids'] ?? ''));
 
