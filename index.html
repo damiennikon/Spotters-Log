@@ -2649,6 +2649,24 @@ function startGoldenHourUpdates() {
   const departureTrackCache = new Map();
   const DEPARTURE_TRACK_STORE_KEY = "photolog_departure_track_v1";
 
+  // Memory of aircraft recently seen in the arrivals list (keyed the same way as
+  // departureTrackCache), so classifyDepartures can refuse to newly classify an airframe that
+  // just landed -- a landing aircraft's flare/rollout can briefly pass the rotation-transition
+  // test (gs>=minRotationKt with a climb-rate blip) and would otherwise be picked up as a
+  // departure while still taxiing in. Memory only -- never persisted to localStorage, since
+  // route/arrival data must stay out of saved shots and the export (adsbdb licence).
+  const recentArrivalsCache = new Map();
+  // A real turnaround (land, park, reboard, taxi out, depart) takes much longer than this, so a
+  // genuine departure of the same airframe is unaffected by this block window.
+  const RECENT_ARRIVAL_BLOCK_MS = 10 * 60 * 1000;
+
+  function pruneRecentArrivalsCache() {
+    const now = Date.now();
+    for (const [k, seenAt] of recentArrivalsCache.entries()) {
+      if (!k || (now - seenAt) > RECENT_ARRIVAL_BLOCK_MS) recentArrivalsCache.delete(k);
+    }
+  }
+
   function pruneDepartureTrackCache(activeKeys) {
     const now = Date.now();
     const TTL_MS = 20 * 60 * 1000; // 20 minutes, same as runwayLockCache/bayEntryCache
@@ -2737,6 +2755,14 @@ function startGoldenHourUpdates() {
       const track = departureTrackCache.get(key);
 
       if (track && track.classifiedAt) {
+        // A landing aircraft can pass the rotation-transition test around touchdown (flare/
+        // rollout climb-rate blip) and get classified, then show up here still taxiing in --
+        // back on the ground at taxi speed is never consistent with an actual departure, however
+        // it got classified, so drop it rather than keep tracking it out to the cutoff.
+        if (isTaxiGroundState(p)) {
+          departureTrackCache.delete(key);
+          continue;
+        }
         // Already confirmed departing -- just track distance-out until the cutoff.
         if (!(typeof dnm === 'number' && isFinite(dnm)) || dnm > DEP_RULES.cutoffNM) {
           departureTrackCache.delete(key);
@@ -2755,10 +2781,12 @@ function startGoldenHourUpdates() {
       }
 
       if (typeof dnm === 'number' && isFinite(dnm) && dnm <= DEP_RULES.detectMaxNM && isRotationTransition(p)) {
+        const recentArrival = recentArrivalsCache.get(key);
+        const blockedAsRecentArrival = typeof recentArrival === 'number' && (now - recentArrival) <= RECENT_ARRIVAL_BLOCK_MS;
         const alt = rawAltFtForDeparture(p);
         const seenOnGroundBefore = !!track; // recorded a taxi/ground observation on an earlier poll
         const firstObservedClimbing = !track && (alt == null || alt <= DEP_RULES.earlyClimbMaxAltFt);
-        if (seenOnGroundBefore || firstObservedClimbing) {
+        if (!blockedAsRecentArrival && (seenOnGroundBefore || firstObservedClimbing)) {
           departureTrackCache.set(key, { ts: now, classifiedAt: now });
           p._dist_nm = dnm;
           p._depSinceMs = 0;
@@ -4803,6 +4831,13 @@ function airlineNameFromFlight(flight) {
         .slice(0, LIMITS.maxResults);
       for (const p of filtered) p._kind = 'arrival';
 
+      // Record this poll's arrivals before classifying departures, so classifyDepartures can see
+      // that an airframe just landed (see recentArrivalsCache above classifyDepartures).
+      for (const p of filtered) {
+        const rk = getRunwayCacheKey(p);
+        if (rk) recentArrivalsCache.set(rk, Date.now());
+      }
+
       // Departures: independent pipeline (see classifyDepartures), computed every refresh
       // regardless of which Cards mode is showing -- Radar always needs both, and a departure's
       // ground->rotation transition must not be missed just because the user has Departures
@@ -4832,6 +4867,7 @@ function airlineNameFromFlight(flight) {
       // independent of which Cards mode is visible.
       pruneDepartureTrackCache(new Set(departuresFiltered.map(p => getRunwayCacheKey(p)).filter(Boolean)));
       saveDepartureTrackCache();
+      pruneRecentArrivalsCache();
 
       // Radar always shows the combined arrivals+departures set, filtered by RADAR_FILTER.
       CURRENT_RADAR_LIST = [...filtered, ...departuresFiltered];
