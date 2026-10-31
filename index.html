@@ -255,6 +255,7 @@
   /* Departures get their own violet, matching the radar icon tint (#c77dff) — kept distinct from
      green (confirmed/locked), amber (01R/19L corridor) and blue (01L/19R corridor). */
   .tag.departing{ color:#c77dff; background:rgba(199,125,255,0.10); border-color:rgba(199,125,255,0.30); }
+  .tag.military{ color:#ffd60a; background:rgba(255,214,10,0.10); border-color:rgba(255,214,10,0.30); }
   .tag.tag-heavy{ color:var(--warn); background:var(--warn-soft); border-color:var(--warn-border); }
   .tag.tag-runway.tag-runway-high{ color:var(--accent); background:var(--accent-soft); border-color:var(--accent-border); }
   .tag.tag-runway.tag-runway-likely{ color:var(--warn); background:var(--warn-soft); border-color:var(--warn-border); }
@@ -640,6 +641,14 @@
     mask-repeat:no-repeat; mask-position:center; mask-size:contain;
     filter:drop-shadow(0 1px 2px rgba(0,0,0,0.5));
   }
+  /* Military variant: identical mask technique, yellow (#ffd60a) -- overrides both the white
+     arrival and violet departure colours, and stays distinct from the amber runway corridor. */
+  .acPngMil{
+    width:22px; height:22px; display:block; background:#ffd60a;
+    -webkit-mask-repeat:no-repeat; -webkit-mask-position:center; -webkit-mask-size:contain;
+    mask-repeat:no-repeat; mask-position:center; mask-size:contain;
+    filter:drop-shadow(0 1px 2px rgba(0,0,0,0.5));
+  }
 
   @media (prefers-reduced-motion: reduce){
     *{ animation-duration:0.001ms !important; transition-duration:0.001ms !important; }
@@ -739,7 +748,7 @@
         <button id="radarHintBtn" class="radarHintBtn glass" type="button" aria-label="Radar help" aria-expanded="false">
           <svg width="18" height="18" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7.5" stroke="currentColor" stroke-width="1.5"/><path d="M10 9v4.2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><circle cx="10" cy="6.6" r="0.9" fill="currentColor"/></svg>
         </button>
-        <div id="radarHintPopover" class="radarHintPopover glass" role="tooltip">Arrivals (white) and departures (violet) plotted top-down. Ring = 30 NM. Tap a marker for details. <b>Zoom in near the airport to see runway guides.</b></div>
+        <div id="radarHintPopover" class="radarHintPopover glass" role="tooltip">Arrivals (white), departures (violet) and military (yellow) plotted top-down. Ring = 30 NM. Tap a marker for details. <b>Zoom in near the airport to see runway guides.</b></div>
         <div id="windSock" class="windSock glass" role="img">
           <svg id="windSockArrow" class="windSockArrow" width="18" height="18" viewBox="0 0 20 20" fill="none" aria-hidden="true">
             <path d="M10 17V3M10 3L6.2 7.8M10 3L13.8 7.8" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
@@ -3200,9 +3209,13 @@ else if (fn === '747.png') {
     // class: .acPng sets `background:transparent !important`, which would beat .acPngDep's fill
     // color regardless of rule order/specificity -- .acPngDep declares its own width/height/
     // display standalone so it doesn't need .acPng at all.
-    const bodyHtml = isDeparture
-      ? `<div class="acPngDep" style="-webkit-mask-image:url('${src}');mask-image:url('${src}');"></div>`
-      : `<img class="acPng" src="${src}" alt="" />`;
+    // Military ('military' kind, passed by updateRadar) takes precedence over both.
+    const isMil = kind === 'military';
+    const bodyHtml = isMil
+      ? `<div class="acPngMil" style="-webkit-mask-image:url('${src}');mask-image:url('${src}');"></div>`
+      : isDeparture
+        ? `<div class="acPngDep" style="-webkit-mask-image:url('${src}');mask-image:url('${src}');"></div>`
+        : `<img class="acPng" src="${src}" alt="" />`;
 
     const html = `
       <div class="acIconContainer">
@@ -3254,7 +3267,7 @@ else if (fn === '747.png') {
       const label = cleanFlight(it) || (it.r || it.t || it.hex || '').toString().trim() || '—';
 
       const typeCode = (it.t || it.type || it.icao_type || it.ac_type || it.aircraft_type || '').toString().trim();
-      const icon = makeAircraftIcon(label, hdg, typeCode, it._kind);
+      const icon = makeAircraftIcon(label, hdg, typeCode, isMilitary(it) ? 'military' : it._kind);
       let m = radarMarkers.get(key);
       if (!m) {
         m = L.marker([lat, lon], { icon, keyboard: false });
@@ -3536,6 +3549,7 @@ const AIRLINE_ICAO = {
   UAE: "Emirates",
   ETD: "Etihad Airways",
   "PAL": "Philippine Airlines",
+  ASY: "RAAF",
 };
 
 // Airline IATA (2-letter) code lookup, keyed by the same 3-letter ICAO prefixes as AIRLINE_ICAO
@@ -3546,7 +3560,7 @@ const AIRLINE_IATA2 = {
   QFA: "QF", QLK: "QF", JST: "JQ", VOZ: "VA", TGW: "TT", VJC: "VJ", ACI: "SB", ANG: "PX",
   CPA: "CX", CAL: "CI", CES: "MU", CCA: "CA", CSN: "CZ", EVA: "BR", KAL: "KE", AAR: "OZ",
   THA: "TG", AFR: "AF", BAW: "BA", DLH: "LH", KLM: "KL", QTR: "QR", UAE: "EK", ETD: "EY",
-  PAL: "PR",
+  PAL: "PR", ASY: "RA",
 };
 
 // Fixed decorative palette for the monogram badge background -- deliberately NOT any airline's
@@ -3822,6 +3836,14 @@ function airlineNameFromFlight(flight) {
   function cleanFlight(p) {
     const raw = (p && p.flight != null) ? String(p.flight).trim() : '';
     return isValidCallsign(raw) ? raw : '';
+  }
+
+  // Display-only military flag (never used to filter or exclude). readsb dbFlags bit 1 = military;
+  // "ASY" is the RAAF callsign prefix. Shared by the radar icon and the card tag/note.
+  function isMilitary(p) {
+    if (!p) return false;
+    if ((Number(p.dbFlags) || 0) & 1) return true;
+    return cleanFlight(p).toUpperCase().startsWith('ASY');
   }
 
   function pickLabel(p) {
@@ -4175,7 +4197,10 @@ function airlineNameFromFlight(flight) {
               <div class="small">${escapeHtml(pickSub(it))}</div>
             </div>`;
 
-      const tagRowHtml = `<div class="tagRow"><div class="${tagClass}">${statusIcon}${statusText}</div>${confidenceChipHtml(rwyLevel)}${runwayChipHtml(rwy, rwyLevel, rawRwy, rawRwyLevel, ICONS.runway, dnm)}${heavy ? `<div class="tag tag-heavy">${ICONS.heavy}Heavy</div>` : ''}</div>`;
+      const tagRowHtml = `<div class="tagRow"><div class="${tagClass}">${statusIcon}${statusText}</div>${confidenceChipHtml(rwyLevel)}${runwayChipHtml(rwy, rwyLevel, rawRwy, rawRwyLevel, ICONS.runway, dnm)}${heavy ? `<div class="tag tag-heavy">${ICONS.heavy}Heavy</div>` : ''}${isMilitary(it) ? `<div class="tag military">Military</div>` : ''}</div>`;
+
+      // Arrivals only: hidden once the gated `rwy` has locked (evidently landing at this airport).
+      const milNoteHtml = (isMilitary(it) && !rwy) ? `<div class="small">Military - likely heading to a RAAF base</div>` : '';
 
       const gridHtml = `
         <div class="grid">
@@ -4230,6 +4255,7 @@ function airlineNameFromFlight(flight) {
         </div>
 
         ${tagRowHtml}
+        ${milNoteHtml}
         ${heroTimeHtml}
         ${confBar}
         ${gridHtml}
@@ -4360,7 +4386,7 @@ function airlineNameFromFlight(flight) {
               <div class="small">${escapeHtml(pickSub(it))}</div>
             </div>`;
 
-      const tagRowHtml = `<div class="tagRow"><div class="tag departing">${ICONS.landing}Departing</div>${heavy ? `<div class="tag tag-heavy">${ICONS.heavy}Heavy</div>` : ''}</div>`;
+      const tagRowHtml = `<div class="tagRow"><div class="tag departing">${ICONS.landing}Departing</div>${heavy ? `<div class="tag tag-heavy">${ICONS.heavy}Heavy</div>` : ''}${isMilitary(it) ? `<div class="tag military">Military</div>` : ''}</div>`;
 
       const gridHtml = `
         <div class="grid">
