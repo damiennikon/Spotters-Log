@@ -653,6 +653,41 @@
   @media (prefers-reduced-motion: reduce){
     *{ animation-duration:0.001ms !important; transition-duration:0.001ms !important; }
   }
+
+  /* ---------- Arrivals Board (own tab, own data pipeline) ---------- */
+  .boardView{ display:none; }
+  .boardView.show{ display:block; }
+  .boardPageTitle{ font-weight:700; font-size:18px; letter-spacing:-0.2px; margin-top:4px; }
+  .boardStatusLine{ margin-top:10px; }
+  .boardCards{ margin-top:12px; }
+  .boardTier2Wrap{ margin-top:26px; }
+  .boardTierHeading{
+    font-size:12.5px; font-weight:700; color:var(--text-2);
+    text-transform:uppercase; letter-spacing:0.05em;
+  }
+  .warnPanel{
+    margin-top:10px; padding:10px 12px; border-radius:var(--r-md);
+    background:var(--warn-soft); border:1px solid var(--warn-border);
+    color:var(--warn); font-size:12px; line-height:1.55;
+  }
+  .boardEmpty{ margin-top:18px; }
+  .boardNote{ margin-top:16px; font-size:10.5px; color:var(--text-3); }
+  .tag.routeUnknown{ color:var(--warn); background:var(--warn-soft); border-color:var(--warn-border); }
+  .tag.boardAirborne{ color:var(--ok); background:var(--ok-soft); border-color:var(--ok-border); }
+  .boardRow{ cursor:pointer; transition:border-color .15s ease; }
+  .boardRow:hover{ border-color:var(--border-strong); }
+  .boardGrid{
+    margin-top:12px; display:grid; grid-template-columns:repeat(3,1fr);
+    border-top:1px solid var(--border);
+  }
+  .boardEta{ margin-top:10px; font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--text-2); }
+  .boardEta.muted{ color:var(--text-3); font-style:italic; }
+  .boardSnapshotMap{
+    width:100%; height:260px; border-radius:var(--r-md); overflow:hidden;
+    border:1px solid var(--border); background:var(--surface-2);
+  }
+  .boardModalDetails{ display:grid; gap:5px; font-size:12.5px; color:var(--text-2); }
+  .boardModalDetails b{ color:var(--text); }
 </style>
 
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
@@ -756,6 +791,40 @@
           <span id="windSockLabel" class="windSockLabel">--kt</span>
         </div>
       </div>
+
+      <!-- Arrivals Board (own tab + data pipeline, separate from Flights/Radar) -->
+      <div id="boardView" class="boardView">
+        <div class="boardPageTitle">Arrivals Board</div>
+        <div class="statusLine mono boardStatusLine" id="boardHeader">
+          <span id="boardUpdated">Loading…</span>
+        </div>
+        <div id="boardEmpty" class="note boardEmpty" style="display:none;"></div>
+        <div id="boardTier1List" class="cards boardCards"></div>
+        <div id="boardTier2Wrap" class="boardTier2Wrap" style="display:none;">
+          <div class="boardTierHeading">Possibly inbound – route unknown</div>
+          <div class="warnPanel">No route data for these flights. They are heading toward Brisbane and descending, but may be going somewhere else (e.g. Gold Coast or Sydney). Treat as a guess.</div>
+          <div id="boardTier2List" class="cards boardCards"></div>
+        </div>
+        <div class="boardNote">ETAs are rough; flights slow and descend before landing.</div>
+      </div>
+  </div>
+
+  <!-- Arrivals Board: position snapshot modal -->
+  <div id="boardModal" class="modal" aria-hidden="true">
+    <div class="modalCard">
+      <div class="modalHead">
+        <div>
+          <div class="modalTitle" id="boardModalTitle">—</div>
+          <div class="modalSub" id="boardModalSub">—</div>
+        </div>
+        <button id="boardModalClose" class="iconBtn" type="button" aria-label="Close">✕</button>
+      </div>
+      <div class="modalBody">
+        <div id="boardModalWarn" class="warnPanel" style="display:none;"></div>
+        <div id="boardSnapshotMap" class="boardSnapshotMap"></div>
+        <div id="boardModalDetails" class="boardModalDetails"></div>
+      </div>
+    </div>
   </div>
 
   <!-- Bottom navigation (Pass 3) -->
@@ -768,6 +837,10 @@
       <button class="navBtn" id="navRadarBtn" data-tab="radar" type="button">
         <svg width="22" height="22" viewBox="0 0 20 20" fill="none"><circle cx="10" cy="10" r="7.5" stroke="currentColor" stroke-width="1.4"/><circle cx="10" cy="10" r="4.3" stroke="currentColor" stroke-width="1.4"/><circle cx="10" cy="10" r="1.3" fill="currentColor"/><path d="M10 10L14.8 5.6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
         <span class="navLabel">Radar</span>
+      </button>
+      <button class="navBtn" id="navBoardBtn" data-tab="board" type="button">
+        <svg width="22" height="22" viewBox="0 0 20 20" fill="none"><rect x="2.5" y="3" width="15" height="14" rx="1.5" stroke="currentColor" stroke-width="1.4"/><path d="M5.5 7h9M5.5 10h9M5.5 13h6" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg>
+        <span class="navLabel">Board</span>
       </button>
       <button class="navBtn" id="savedBtn" data-tab="saved" type="button">
         <span class="navIconWrap">
@@ -857,6 +930,13 @@
   // set the proxy filename here to match what exists on the server.
   // It will auto-fallback between proxy.php and proxy.php.
   const PROXY_CANDIDATES = ['./proxy.php'];
+
+  // CARTO basemap API key (removes the "no key" watermark on the tiles). Shared by every Leaflet
+  // map in the app (the radar in ensureRadarMap, and the Arrivals Board snapshot map) so there is
+  // only ever one copy of it. Per CARTO's documented tile-URL format, passed as the `key` query
+  // parameter (NOT `api_key` -- that name is silently ignored by the tile server).
+  const CARTO_API_KEY = 'cb1_2lrw_1_3514937bc4045b3dc1f8f3fb';
+  const CARTO_TILE_URL = `https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?key=${CARTO_API_KEY}`;
 
   // Airports (AU + NZ) – lightweight built-in list
 const AIRPORTS = [
@@ -2811,8 +2891,10 @@ function startGoldenHourUpdates() {
   const $cards = document.getElementById('cards');
   const $radarWrap = document.getElementById('radarWrap');
   const $flightsTab = document.getElementById('flightsTab');
+  const $boardView = document.getElementById('boardView');
   const $navFlightsBtn = document.getElementById('navFlightsBtn');
   const $navRadarBtn = document.getElementById('navRadarBtn');
+  const $navBoardBtn = document.getElementById('navBoardBtn');
   const $navSettingsBtn = document.getElementById('navSettingsBtn');
   const $modeArrivalsBtn = document.getElementById('modeArrivalsBtn');
   const $windSock = document.getElementById('windSock');
@@ -2820,6 +2902,19 @@ function startGoldenHourUpdates() {
   const $windSockLabel = document.getElementById('windSockLabel');
   const $modeDeparturesBtn = document.getElementById('modeDeparturesBtn');
   const $radarFilterBtns = Array.from(document.querySelectorAll('#radarFilterRow [data-radar-filter]'));
+
+  // ===== Arrivals Board state (declared here, ahead of setTabMode below, so TAB_MODE === 'board'
+  // switches -- which can happen before the Board module further down the file has run -- never
+  // hit a temporal-dead-zone reference; see the Arrivals Board section near the end of this
+  // script for the functions that use these). =====
+  const boardEntries = new Map();
+  let boardTimer = null;
+  let boardInFlight = false;
+  const $boardUpdated = document.getElementById('boardUpdated');
+  const $boardEmpty = document.getElementById('boardEmpty');
+  const $boardTier1List = document.getElementById('boardTier1List');
+  const $boardTier2Wrap = document.getElementById('boardTier2Wrap');
+  const $boardTier2List = document.getElementById('boardTier2List');
 
   // ===== View state =====
   // Bottom-nav tab currently shown as the main content area (Flights or Radar). Saved/Settings
@@ -3007,11 +3102,12 @@ function startGoldenHourUpdates() {
   // full-screen (see .radarWrap.show), replacing the whole Flights-tab content area rather than
   // sitting alongside it.
   function setTabMode(mode) {
-    TAB_MODE = (mode === 'radar') ? 'radar' : 'flights';
+    TAB_MODE = (mode === 'radar') ? 'radar' : (mode === 'board') ? 'board' : 'flights';
     updateNavActiveState();
 
     if ($flightsTab) $flightsTab.style.display = (TAB_MODE === 'flights') ? '' : 'none';
     if ($radarWrap) $radarWrap.classList.toggle('show', TAB_MODE === 'radar');
+    if ($boardView) $boardView.classList.toggle('show', TAB_MODE === 'board');
 
     if (TAB_MODE === 'radar') {
       ensureRadarMap();
@@ -3030,6 +3126,12 @@ function startGoldenHourUpdates() {
     } else {
       stopMetarPolling();
     }
+
+    if (TAB_MODE === 'board') {
+      startBoardPolling();
+    } else {
+      stopBoardPolling();
+    }
   }
 
   // Highlights the nav button for whichever tab is actually showing. Saved/Settings are modals,
@@ -3039,6 +3141,7 @@ function startGoldenHourUpdates() {
   function updateNavActiveState() {
     if ($navFlightsBtn) $navFlightsBtn.classList.toggle('active', TAB_MODE === 'flights');
     if ($navRadarBtn) $navRadarBtn.classList.toggle('active', TAB_MODE === 'radar');
+    if ($navBoardBtn) $navBoardBtn.classList.toggle('active', TAB_MODE === 'board');
     if ($savedBtn) $savedBtn.classList.remove('active');
     if ($navSettingsBtn) $navSettingsBtn.classList.remove('active');
   }
@@ -3082,14 +3185,10 @@ function startGoldenHourUpdates() {
       preferCanvas: true
     }).setView(center, 9);
 
-    // CARTO basemap API key (removes the "no key" watermark on the tiles below).
-    // Per CARTO's documented tile-URL format, passed as the `key` query parameter
-    // (NOT `api_key` -- that name is silently ignored by the tile server).
-    const CARTO_API_KEY = 'cb1_2lrw_1_3514937bc4045b3dc1f8f3fb';
-
     // CartoDB Dark Matter tiles (built from OSM data; free). No {s} subdomain
     // sharding -- CARTO's current docs serve this endpoint from a single host.
-    L.tileLayer(`https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png?key=${CARTO_API_KEY}`, {
+    // URL/key: shared CARTO_TILE_URL constant (see its declaration near PROXY_CANDIDATES above).
+    L.tileLayer(CARTO_TILE_URL, {
       maxZoom: 20,
       minZoom: 5,
       attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
@@ -5228,6 +5327,7 @@ let savedShots = sanitizeSavedShots(loadSaved());
   // Bottom nav: Flights / Radar tabs
   if ($navFlightsBtn) $navFlightsBtn.addEventListener('click', () => setTabMode('flights'));
   if ($navRadarBtn) $navRadarBtn.addEventListener('click', () => setTabMode('radar'));
+  if ($navBoardBtn) $navBoardBtn.addEventListener('click', () => setTabMode('board'));
   // Default tab
   setTabMode('flights');
 
@@ -5409,6 +5509,390 @@ if ($closeSavedBtn) $closeSavedBtn.addEventListener('click', closeSavedModal);
   // Golden-hour indicator: pure local computation, independent of the ADS-B refresh cycle and
   // not gated to any particular tab (unlike the wind sock, which costs a network call).
   startGoldenHourUpdates();
+// ===== Arrivals Board =====
+  // A new, separate tab + data pipeline (own 60s refresh, own fetch, own filtering) -- does not
+  // read or write LIMITS/RULES/DEP_RULES, does not call predictRunwayForAircraft/
+  // predictRunwayGeometry/classifyDepartures/isInboundCandidate/shouldExcludeAmberleyTraffic, and
+  // never touches CURRENT_ARRIVALS/CURRENT_DEPARTURES/CURRENT_RADAR_LIST or the 10s refresh()
+  // loop. It DOES reuse a few generic, display-only helpers shared with the rest of the app
+  // (distNM, bearingDeg, angleDiff, isGroundish, cleanFlight, airlineNameFromFlight,
+  // airlineMonogramHtml, aircraftTypePretty, ft/kt, escapeHtml, fmtTime, normalizeAircraft, the
+  // AIRPORTS list, and fetchOneRoute/routeCache) exactly as those already behave elsewhere.
+
+  // Tunable thresholds -- kept together so they're easy to adjust in one place.
+  const BOARD_RADIUS_NM = 250;                 // fetchBoardRadius() request radius
+  const BOARD_REFRESH_MS = 60000;               // own refresh cadence, only while the tab is open
+  const BOARD_PREFILTER_MAX_TRACK_ERR_DEG = 60; // pre-filter: track vs bearing to APT
+  const BOARD_MAX_NEW_ROUTE_LOOKUPS = 20;       // new (not-yet-cached) route lookups per cycle
+  const BOARD_POSSIBLE_MAX_DIST_NM = 150;
+  const BOARD_POSSIBLE_MAX_TRACK_ERR_DEG = 25;  // track vs bearing to APT
+  const BOARD_POSSIBLE_MIN_DESCENT_FPM = 300;   // baro_rate/geom_rate must be <= -300
+  const BOARD_POSSIBLE_MIN_GS_KT = 120;
+  const BOARD_ETA_MIN_GS_KT = 100;              // ETA hidden below this ground speed
+
+  // boardEntries/boardTimer/boardInFlight and the $board* DOM refs are declared earlier, right
+  // after $boardView (see the comment there) -- key -> { p, dnm, trackErr, tier, route, gs, eta,
+  // ts }, session-only per the licence guardrail below, last-seen position/timestamp per
+  // aircraft kept across cycles even once it drops off the current tier lists, so a snapshot
+  // modal opened for it can still show "last known position" with an accurate age.
+
+  // Task 1a: proxy.php reads $_GET['radius'] (not 'dist_nm' -- see tryFetchWithProxy above,
+  // which sends 'dist_nm' and is left untouched per scope), capped server-side; see the
+  // top-of-report note and the proxy.php diff for the cap raise from 120 to 250.
+  async function fetchBoardAircraft() {
+    const url = new URL('./proxy.php', location.href);
+    url.searchParams.set('lat', String(APT.lat));
+    url.searchParams.set('lon', String(APT.lon));
+    url.searchParams.set('radius', String(BOARD_RADIUS_NM));
+    url.searchParams.set('_', String(Date.now()));
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 12000);
+    let resp;
+    try {
+      resp = await fetch(url.toString(), { cache: 'no-store', signal: controller.signal });
+    } catch (e) {
+      if (e && e.name === 'AbortError') throw new Error('Board proxy timeout after 12s');
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
+    if (!resp.ok) throw new Error(`Board proxy HTTP ${resp.status}`);
+    return normalizeAircraft(await resp.json());
+  }
+
+  // Ground-aware altitude reader, local to the board pipeline (alt_baro/alt_geom can arrive as
+  // the literal string "ground" rather than a number -- same shape rawAltFtForDeparture handles
+  // for departures, kept as a separate copy here so the board pipeline doesn't reach into the
+  // departure-detection code it's required to leave alone).
+  function boardAltFt(p) {
+    const raw = (p && p.alt_baro !== undefined && p.alt_baro !== null) ? p.alt_baro : (p && p.alt_geom);
+    if (typeof raw === 'string' && raw.trim().toLowerCase() === 'ground') return 0;
+    return ft(raw);
+  }
+
+  // Task 1b: shared pre-filter for both tiers.
+  function boardPassesPreFilter(p, trackErr) {
+    if (isGroundish(p)) return false;
+    const alt = boardAltFt(p);
+    if (alt == null || alt <= 1000) return false;
+    if (!cleanFlight(p)) return false;
+    if (trackErr == null || trackErr > BOARD_PREFILTER_MAX_TRACK_ERR_DEG) return false;
+    return true;
+  }
+
+  // Task 1c: cap NEW (not-yet-cached) route lookups to BOARD_MAX_NEW_ROUTE_LOOKUPS per cycle,
+  // reusing the exact same fetchOneRoute/routeCache the 10s refresh loop populates -- a callsign
+  // looked up by either pipeline benefits both. Uncapped callsigns are simply left for next cycle
+  // (see boardRouteState's 'pending' case, which deliberately shows nothing yet).
+  async function boardFetchRoutesCapped(aircraftList) {
+    const seen = new Set();
+    const toFetch = [];
+    for (const p of aircraftList) {
+      const cs = cleanFlight(p);
+      if (!cs || seen.has(cs) || routeCache.has(cs)) continue;
+      seen.add(cs);
+      toFetch.push({ cs, hex: (p.hex || '').toString().trim() });
+      if (toFetch.length >= BOARD_MAX_NEW_ROUTE_LOOKUPS) break;
+    }
+    if (!toFetch.length) return;
+    await Promise.all(toFetch.map(({ cs, hex }) => fetchOneRoute(hex, cs)));
+  }
+
+  // 'tier1' (route confirmed to APT), 'exclude' (route confirmed elsewhere), 'miss' (cached miss
+  // -- candidate for tier 2), or 'pending' (lookup not yet done this cycle -- not shown).
+  function boardRouteState(cs) {
+    if (!cs || !routeCache.has(cs)) return 'pending';
+    const r = routeCache.get(cs);
+    if (r && !r.miss && r.destination) {
+      return (String(r.destination).toUpperCase() === String(APT.icao).toUpperCase()) ? 'tier1' : 'exclude';
+    }
+    return 'miss';
+  }
+
+  // Task 1d false-positive guard: drop a route-MISS candidate if its track points at some OTHER
+  // airport (read-only scan of the existing AIRPORTS list) with a smaller angular error than it
+  // points at APT, and that other airport is no farther from the aircraft than APT is. Aimed at
+  // e.g. Gold Coast arrivals tracking up the coast from the south, which can otherwise look like a
+  // Brisbane-bound track this far out.
+  function boardPointsMoreAtOtherAirport(p, dnmToApt, trackErrToApt) {
+    for (const other of AIRPORTS) {
+      if (!other || other.icao === APT.icao) continue;
+      const bearingToOther = bearingDeg(p.lat, p.lon, other.lat, other.lon);
+      const errToOther = angleDiff(p.track, bearingToOther);
+      if (errToOther >= trackErrToApt) continue;
+      const distToOther = distNM(p.lat, p.lon, other.lat, other.lon);
+      if (distToOther <= dnmToApt) return true;
+    }
+    return false;
+  }
+
+  // Task 1d tier-2 criteria -- ALL must hold for a route-MISS candidate.
+  function boardIsPossibleInbound(p, dnm, trackErr) {
+    if (dnm > BOARD_POSSIBLE_MAX_DIST_NM) return false;
+    if (trackErr == null || trackErr > BOARD_POSSIBLE_MAX_TRACK_ERR_DEG) return false;
+    const br = (typeof p.baro_rate === 'number') ? p.baro_rate : (typeof p.geom_rate === 'number' ? p.geom_rate : null);
+    if (br == null || br > -BOARD_POSSIBLE_MIN_DESCENT_FPM) return false;
+    const gs = kt(p.gs);
+    if (gs == null || gs < BOARD_POSSIBLE_MIN_GS_KT) return false;
+    if (boardPointsMoreAtOtherAirport(p, dnm, trackErr)) return false;
+    return true;
+  }
+
+  // Task 1e ETA. Hidden below BOARD_ETA_MIN_GS_KT (too slow/unreliable an estimate to show at
+  // all, per spec) -- distinct from the tier-2 "if inbound" muted prefix, which is a display-only
+  // hedge applied on top of a real ETA.
+  function boardEta(dnm, gs, nowMs) {
+    if (typeof gs !== 'number' || !isFinite(gs) || gs < BOARD_ETA_MIN_GS_KT) return null;
+    if (typeof dnm !== 'number' || !isFinite(dnm) || dnm < 0) return null;
+    const minutes = (dnm / gs) * 60;
+    if (!isFinite(minutes) || minutes < 0) return null;
+    const arrival = new Date(nowMs + minutes * 60000);
+    const clock = `${String(arrival.getHours()).padStart(2, '0')}:${String(arrival.getMinutes()).padStart(2, '0')}`;
+    return { minutes: Math.round(minutes), clock };
+  }
+
+  function boardKeyFor(p) {
+    return (p.hex || p.flight || `${p.lat},${p.lon}`);
+  }
+
+  async function boardRefreshCycle() {
+    if (boardInFlight || TAB_MODE !== 'board') return;
+    boardInFlight = true;
+    try {
+      const raw = await fetchBoardAircraft();
+      if (TAB_MODE !== 'board') return; // left the tab while the fetch was in flight
+
+      const candidates = [];
+      for (const p of raw) {
+        if (typeof p.lat !== 'number' || typeof p.lon !== 'number') continue;
+        const dnm = distNM(p.lat, p.lon, APT.lat, APT.lon);
+        const trackErr = (typeof p.track === 'number')
+          ? angleDiff(p.track, bearingDeg(p.lat, p.lon, APT.lat, APT.lon))
+          : null;
+        if (!boardPassesPreFilter(p, trackErr)) continue;
+        candidates.push({ p, dnm, trackErr });
+      }
+
+      await boardFetchRoutesCapped(candidates.map(c => c.p));
+      if (TAB_MODE !== 'board') return;
+
+      const now = Date.now();
+      const tier1 = [];
+      const tier2 = [];
+
+      for (const { p, dnm, trackErr } of candidates) {
+        const cs = cleanFlight(p);
+        const state = boardRouteState(cs);
+        if (state === 'exclude' || state === 'pending') continue;
+
+        if (state === 'miss' && !boardIsPossibleInbound(p, dnm, trackErr)) continue;
+
+        const gs = kt(p.gs);
+        const eta = boardEta(dnm, gs, now);
+        const key = boardKeyFor(p);
+        const entry = {
+          key, p, dnm, trackErr, gs, eta, ts: now,
+          tier: (state === 'tier1') ? 1 : 2,
+          route: (state === 'tier1') ? routeCache.get(cs) : null,
+        };
+        boardEntries.set(key, entry);
+        (entry.tier === 1 ? tier1 : tier2).push(entry);
+      }
+
+      // Tier 1: ETA ascending (unknown ETA last), tie-broken by distance. Tier 2: distance ascending.
+      tier1.sort((a, b) => {
+        const ea = a.eta ? a.eta.minutes : Infinity;
+        const eb = b.eta ? b.eta.minutes : Infinity;
+        return (ea !== eb) ? ea - eb : a.dnm - b.dnm;
+      });
+      tier2.sort((a, b) => a.dnm - b.dnm);
+
+      boardRenderHeader(now, tier1.length, tier2.length);
+      boardRenderTier(tier1, $boardTier1List);
+      boardRenderTier(tier2, $boardTier2List);
+      if ($boardTier2Wrap) $boardTier2Wrap.style.display = tier2.length ? '' : 'none';
+      if ($boardEmpty) {
+        const isEmpty = !tier1.length && !tier2.length;
+        $boardEmpty.style.display = isEmpty ? '' : 'none';
+        if (isEmpty) {
+          $boardEmpty.innerHTML = `No tracked flights bound for ${escapeHtml((APT && APT.name) || 'this airport')} right now<br/><br/>` +
+            `The board only shows flights currently picked up by ADS-B — long-haul flights can drop out of coverage over oceans.`;
+        }
+      }
+    } catch (e) {
+      console.error('Board refresh failed', e);
+    } finally {
+      boardInFlight = false;
+    }
+  }
+
+  function boardRenderHeader(nowMs, nTier1, nTier2) {
+    if (!$boardUpdated) return;
+    $boardUpdated.textContent = `Updated ${fmtTime(new Date(nowMs))} - ${nTier1} confirmed, ${nTier2} possible`;
+  }
+
+  function boardRowHtml(entry) {
+    const { p, dnm, tier, route, eta } = entry;
+    const cs = cleanFlight(p) || (p.hex ? String(p.hex).toUpperCase() : '—');
+    const prefix = cs.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 3);
+    const tp = aircraftTypePretty(p.t);
+    const alt = ft(p.alt_baro ?? p.alt_geom);
+    const gs = kt(p.gs);
+
+    const tagHtml = (tier === 1)
+      ? `<div class="tag boardAirborne">Airborne</div>`
+      : `<div class="tag routeUnknown">Route unknown</div>`;
+
+    const routeLineHtml = (tier === 1 && route)
+      ? `<div class="small route">${escapeHtml(route.origin || '—')} → ${escapeHtml((APT && APT.icao) || '')}</div>`
+      : '';
+
+    let etaHtml = '';
+    if (eta) {
+      etaHtml = (tier === 1)
+        ? `<div class="boardEta">~${eta.clock} local · in ~${eta.minutes} min</div>`
+        : `<div class="boardEta muted">if inbound: ~${eta.clock} local · in ~${eta.minutes} min</div>`;
+    }
+
+    return `
+      <div class="card boardRow" data-board-key="${escapeHtml(String(entry.key))}">
+        <div class="row">
+          <div class="rowInfo">
+            <div class="flight">${escapeHtml(cs)}</div>
+            <div class="airline">${airlineMonogramHtml(prefix)}<span>${escapeHtml(airlineNameFromFlight(cs))}</span></div>
+            ${routeLineHtml}
+            ${tp ? `<div class="atype">${escapeHtml(tp)}</div>` : ''}
+          </div>
+          ${tagHtml}
+        </div>
+        <div class="boardGrid">
+          <div class="chip">${ICONS.ruler}<div class="v">${dnm.toFixed(0)}</div><div class="k">Dist nm</div></div>
+          <div class="chip">${ICONS.alt}<div class="v">${alt != null ? alt.toLocaleString() : '—'}</div><div class="k">Alt ft</div></div>
+          <div class="chip">${ICONS.gs}<div class="v">${gs != null ? gs.toLocaleString() : '—'}</div><div class="k">GS kt</div></div>
+        </div>
+        ${etaHtml}
+      </div>
+    `;
+  }
+
+  function boardRenderTier(list, container) {
+    if (!container) return;
+    container.innerHTML = list.map(boardRowHtml).join('');
+    container.querySelectorAll('[data-board-key]').forEach(el => {
+      el.addEventListener('click', () => boardOpenModal(el.getAttribute('data-board-key')));
+    });
+  }
+
+  // ===== Task 3: position snapshot modal =====
+  let boardSnapshotMap = null;
+  let boardSnapshotAcMarker = null;
+  let boardSnapshotAptMarker = null;
+
+  function ensureBoardSnapshotMap() {
+    if (boardSnapshotMap || typeof window.L === 'undefined') return;
+    const el = document.getElementById('boardSnapshotMap');
+    if (!el) return;
+    boardSnapshotMap = L.map(el, { zoomControl: true, attributionControl: true, preferCanvas: true });
+    // Same CARTO tile URL/key configuration as ensureRadarMap (CARTO_TILE_URL, shared above).
+    L.tileLayer(CARTO_TILE_URL, {
+      maxZoom: 20, minZoom: 4,
+      attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+    }).addTo(boardSnapshotMap);
+  }
+
+  function boardOpenModal(key) {
+    const entry = boardEntries.get(key);
+    if (!entry) return;
+    const modal = document.getElementById('boardModal');
+    const title = document.getElementById('boardModalTitle');
+    const sub = document.getElementById('boardModalSub');
+    const warn = document.getElementById('boardModalWarn');
+    const details = document.getElementById('boardModalDetails');
+    if (!modal || !details) return;
+
+    const { p, dnm, gs, eta, tier, route, ts } = entry;
+    const cs = cleanFlight(p) || (p.hex ? String(p.hex).toUpperCase() : '—');
+    if (title) title.textContent = cs;
+    if (sub) {
+      sub.textContent = (tier === 1 && route)
+        ? `${route.origin || '—'} → ${(APT && APT.icao) || ''}`
+        : 'Route unknown – possibly inbound';
+    }
+    if (warn) {
+      warn.style.display = (tier === 2) ? '' : 'none';
+      if (tier === 2) warn.textContent = 'No route data for this flight. It is heading this way and descending, but may be going somewhere else. Treat as a guess.';
+    }
+
+    const alt = ft(p.alt_baro ?? p.alt_geom);
+    const ageMin = Math.max(0, Math.round((Date.now() - ts) / 60000));
+    const posAt = fmtTime(new Date(ts));
+    const etaLine = eta
+      ? `${tier === 2 ? 'if inbound: ' : ''}~${eta.clock} local (in ~${eta.minutes} min)`
+      : '—';
+
+    details.innerHTML = `
+      <div><b>Distance:</b> ${dnm.toFixed(1)} nm</div>
+      <div><b>Altitude:</b> ${alt != null ? `${alt.toLocaleString()} ft` : '—'}</div>
+      <div><b>Ground speed:</b> ${gs != null ? `${gs} kt` : '—'}</div>
+      <div><b>Heading:</b> ${typeof p.track === 'number' ? `${Math.round(p.track)}°` : '—'}</div>
+      <div><b>ETA:</b> ${etaLine}</div>
+      <div>Position as of ${posAt} (${ageMin} min ago)</div>
+    `;
+
+    modal.classList.add('show');
+    modal.setAttribute('aria-hidden', 'false');
+
+    ensureBoardSnapshotMap();
+    if (boardSnapshotMap && typeof p.lat === 'number' && typeof p.lon === 'number') {
+      if (boardSnapshotAcMarker) { boardSnapshotMap.removeLayer(boardSnapshotAcMarker); boardSnapshotAcMarker = null; }
+      if (boardSnapshotAptMarker) { boardSnapshotMap.removeLayer(boardSnapshotAptMarker); boardSnapshotAptMarker = null; }
+
+      const heading = (typeof p.track === 'number') ? p.track : 0;
+      boardSnapshotAcMarker = L.marker([p.lat, p.lon], { icon: makeAircraftIcon(cs, heading, p.t, 'arrival') }).addTo(boardSnapshotMap);
+      boardSnapshotAptMarker = L.circleMarker([APT.lat, APT.lon], {
+        radius: 6, weight: 2, color: '#ffffff', fillColor: '#000000', fillOpacity: 0.3
+      }).addTo(boardSnapshotMap).bindTooltip((APT && APT.icao) || '', { permanent: false });
+
+      const bounds = L.latLngBounds([[p.lat, p.lon], [APT.lat, APT.lon]]);
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (!boardSnapshotMap) return;
+          boardSnapshotMap.invalidateSize();
+          boardSnapshotMap.fitBounds(bounds, { padding: [32, 32] });
+        });
+      });
+    }
+  }
+
+  function boardCloseModal() {
+    const modal = document.getElementById('boardModal');
+    if (!modal) return;
+    modal.classList.remove('show');
+    modal.setAttribute('aria-hidden', 'true');
+    if (boardSnapshotMap) {
+      if (boardSnapshotAcMarker) { boardSnapshotMap.removeLayer(boardSnapshotAcMarker); boardSnapshotAcMarker = null; }
+      if (boardSnapshotAptMarker) { boardSnapshotMap.removeLayer(boardSnapshotAptMarker); boardSnapshotAptMarker = null; }
+    }
+  }
+
+  // Task 1f lifecycle: refresh every 60s ONLY while the Board tab is visible; fetch immediately
+  // on open; stop all timers/requests on leaving. Nothing runs in the background otherwise.
+  function startBoardPolling() {
+    stopBoardPolling();
+    boardRefreshCycle();
+    boardTimer = setInterval(boardRefreshCycle, BOARD_REFRESH_MS);
+  }
+
+  function stopBoardPolling() {
+    if (boardTimer) { clearInterval(boardTimer); boardTimer = null; }
+  }
+
+  const $boardModal = document.getElementById('boardModal');
+  const $boardModalClose = document.getElementById('boardModalClose');
+  if ($boardModalClose) $boardModalClose.addEventListener('click', boardCloseModal);
+  if ($boardModal) $boardModal.addEventListener('click', (e) => { if (e.target === $boardModal) boardCloseModal(); });
+
 // ===== Service Worker =====
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', async () => {
