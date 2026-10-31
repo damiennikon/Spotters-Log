@@ -9,7 +9,10 @@ $lon = floatval($_GET['lon'] ?? 0);
 $radius = floatval($_GET['radius'] ?? 45);
 
 if ($radius < 1) $radius = 1;
-if ($radius > 120) $radius = 120;
+// Raised from 120 to 250 (Arrivals Board feature) -- adsb.lol's /v2/point/ endpoint accepts up
+// to 250NM; every existing caller requests well under the old 120 cap, so this is additive and
+// doesn't change any existing request's behaviour.
+if ($radius > 250) $radius = 250;
 
 $url = "https://api.adsb.lol/v2/point/$lat/$lon/$radius";
 
