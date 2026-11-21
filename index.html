@@ -2,14 +2,14 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#08090b" />
   <title>Shot Log – Arriving Soon (Brisbane)</title>
 
-  <link rel="manifest" href="/photo-log/manifest.json">
+  <link rel="manifest" href="./manifest.json">
 
-<link rel="icon" href="/photo-log/icons/icon-192.png" sizes="192x192">
-<link rel="apple-touch-icon" href="/photo-log/icons/icon-192.png">
+<link rel="icon" href="./icons/icon-192.png" sizes="192x192">
+<link rel="apple-touch-icon" href="./icons/icon-192.png">
 
 <meta name="theme-color" content="#08090b">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -399,10 +399,10 @@
   .spotCard .name{ font-weight:700; font-size:14px; }
   .spotCard .lens{ font-family:'IBM Plex Mono',monospace; font-size:11px; color:var(--accent); white-space:nowrap; }
   .spotCard .notes{ margin-top:4px; font-size:12px; color:var(--text-3); line-height:1.5; }
-  .spotNavBtn{
-    margin-top:8px; display:inline-flex; align-items:center; gap:5px;
-    padding:6px 10px; font-size:11.5px; text-decoration:none;
+  .spotNavHint{
+    margin-bottom:8px; color:var(--text-3); font-size:11.5px; line-height:1.45;
   }
+  .spotNavHint b{ color:var(--text-2); }
   .spotEmpty{
     padding:12px 14px; border:1px dashed var(--border); border-radius:var(--r-md);
     color:var(--text-3); font-size:12px;
@@ -697,6 +697,7 @@
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 
+<link rel="stylesheet" href="./dialogs.css?v=20261121-ios-layout">
 </head>
 <body>
   <div class="wrap">
@@ -921,6 +922,7 @@
     </div>
   </div>
 
+<script src="./dialogs.js?v=20261121-ios-layout"></script>
 <script>
 (() => {
   // ===== Config =====
@@ -1146,6 +1148,7 @@ const SPOTS_YBBN = [
     name: "Acacia Loop",
     lat: -27.376755, lon: 153.127653,
     runways: ["19L", "01R"],
+    arrivalRunways: ["19L"],
     style: "both",
     lens: "120-400mm",
     notes: "19L touchdowns + 01R departures, both over the bay. If it's 19R instead, this is more of a taxi/crossing shot than a touchdown.",
@@ -1155,6 +1158,7 @@ const SPOTS_YBBN = [
     name: "Boronia Road",
     lat: -27.415621, lon: 153.105559,
     runways: ["01R"],
+    arrivalRunways: ["01R"],
     style: "arriving",
     lens: "120-400mm",
     notes: "Close final approach, undercarriage detail. Businesses nearby — be mindful.",
@@ -1173,6 +1177,7 @@ const SPOTS_YBBN = [
     name: "Lomandra Drive",
     lat: -27.420584, lon: 153.096029,
     runways: ["01L", "01R"],
+    arrivalRunways: ["01L", "01R"],
     style: "both",
     lens: "120-400mm",
     notes: "01L primary line, 01R visible wider-angle.",
@@ -1182,6 +1187,7 @@ const SPOTS_YBBN = [
     name: "Lakeside Drive",
     lat: -27.414814, lon: 153.088359,
     runways: ["01L"],
+    arrivalRunways: ["01L"],
     style: "arriving",
     lens: "28-300mm",
     notes: "Secondary 01L approach spot, wider than Boronia.",
@@ -1191,6 +1197,7 @@ const SPOTS_YBBN = [
     name: "The Blvd",
     lat: -27.419088, lon: 153.080280,
     runways: ["01L"],
+    arrivalRunways: ["01L"],
     style: "arriving",
     lens: "120-400mm",
     notes: "Wide, over-the-city scenic shot on 01L final.",
@@ -1246,11 +1253,23 @@ function isDedicatedSpot(s) {
 // runwayName has no L/R suffix (a "family" guess like "19" — used when we know it's a
 // north-side arrival but can't yet tell which specific parallel runway), any spot that
 // covers either side of that family.
-function spotServesRunway(spot, runwayName) {
+function runwayListServesRunway(runways, runwayName) {
   if (!runwayName) return false;
-  if (spot.runways.includes(runwayName)) return true;
-  if (/^\d+$/.test(runwayName)) return spot.runways.some(r => r.startsWith(runwayName));
+  const list = Array.isArray(runways) ? runways : [];
+  if (list.includes(runwayName)) return true;
+  if (/^\d+$/.test(runwayName)) return list.some(r => r.startsWith(runwayName));
   return false;
+}
+
+function spotServesRunway(spot, runwayName) {
+  return runwayListServesRunway(spot.runways, runwayName);
+}
+
+// Some spots are useful for both runway families but are not the best arrival position on
+// every runway they can see. Acacia Loop is excellent for 19L touchdowns but is primarily a
+// 01R departure spot; Boronia Road is the better 01R arrival position.
+function isPreferredArrivalSpot(spot, runwayName) {
+  return Array.isArray(spot.arrivalRunways) && runwayListServesRunway(spot.arrivalRunways, runwayName);
 }
 
 function bestSpotsForRunway(icao, runwayName) {
@@ -1259,7 +1278,14 @@ function bestSpotsForRunway(icao, runwayName) {
 
   const matches = allSpots
     .filter(s => s.status === 'open' && spotServesRunway(s, runwayName))
-    .sort((a, b) => (isDedicatedSpot(b) ? 1 : 0) - (isDedicatedSpot(a) ? 1 : 0));
+    // An arrival-specific spot list prevents a departure-oriented spot such as Acacia Loop
+    // from being recommended for an arriving 01R aircraft. Generic fallback spots remain usable.
+    .filter(s => !Array.isArray(s.arrivalRunways) || isPreferredArrivalSpot(s, runwayName))
+    .sort((a, b) => {
+      const preferred = Number(isPreferredArrivalSpot(b, runwayName)) - Number(isPreferredArrivalSpot(a, runwayName));
+      if (preferred) return preferred;
+      return (isDedicatedSpot(b) ? 1 : 0) - (isDedicatedSpot(a) ? 1 : 0);
+    });
 
   // If the best (dedicated, currently-closed) spot for this runway isn't in the open
   // results, surface that gap explicitly rather than silently recommending a lesser spot.
@@ -3344,10 +3370,10 @@ else if (fn === '747.png') {
   iconSize = 57;
 }
 
-    // Use relative path so it works on your domain: /photo-log/icons/aircraft/*.png
+    // Use relative path so it works on your domain: ./icons/aircraft/*.png
     // Cache-bust to avoid mobile caching issues
     const __v = (typeof window !== 'undefined' && (window.APP_VERSION || window.appVersion)) ? (window.APP_VERSION || window.appVersion) : '0';
-    const src = `/photo-log/icons/aircraft/${fn}?v=${encodeURIComponent(__v)}`;
+    const src = `./icons/aircraft/${fn}?v=${encodeURIComponent(__v)}`;
 
     const isDeparture = kind === 'departure';
     // Departures: a plain div masked by the same PNG (alpha channel), filled with a background
@@ -3485,8 +3511,7 @@ const $airportUseDefault = document.getElementById('airportUseDefault');
 
 function showAirportModal() {
   if (!$airportModal) return;
-  $airportModal.classList.add('show');
-  $airportModal.setAttribute('aria-hidden', 'false');
+  window.SpottersDialogs.show($airportModal);
   if ($airportInput) {
     // Hidden value used by existing apply logic
     $airportInput.value = (APT && APT.icao) ? APT.icao : (DEFAULT_APT ? DEFAULT_APT.icao : "");
@@ -3499,8 +3524,7 @@ function showAirportModal() {
 }
 function hideAirportModal() {
   if (!$airportModal) return;
-  $airportModal.classList.remove('show');
-  $airportModal.setAttribute('aria-hidden', 'true');
+  window.SpottersDialogs.hide($airportModal);
 }
 
 function parseAirportInput(v) {
@@ -4365,27 +4389,28 @@ function airlineNameFromFlight(flight) {
           <div class="heroTimeValue"><span class="heroTimeNum">${etaMin != null ? etaMin : '—'}</span><span class="heroTimeUnit">min</span></div>
         </div>` : '';
 
-      // Best-spotting-position summary, inline on the hero card (Pass 4) -- only once `rwy`
-      // (the same gated value driving the RWY chip/confidence chip above) has actually locked
-      // in; before that, showing nothing here avoids a second uncertain element sitting next to
-      // the chip's own "Check map to confirm runway" hedge. Reuses bestSpotsForRunway (the same
-      // matching logic showSpotModal already uses) rather than any new prediction call.
-      let heroSpotHtml = '';
-      if (isHero && rwy) {
+      // Best-spotting-position summary -- only once `rwy` (the same gated value driving the RWY
+      // chip/confidence chip above) has actually locked in. Every arrival card uses the same
+      // two-column treatment so the recommendation is visually consistent throughout the list.
+      // This deliberately uses the confirmed/gated runway, not rawRwy, so it appears at the same
+      // moment as the confirmed runway chip and never presents an early guess as settled advice.
+      let spotSummaryHtml = '';
+      if (rwy) {
         const icaoForSpots = (APT && APT.icao) ? String(APT.icao).toUpperCase() : '';
         const { matches, missingPrimary } = bestSpotsForRunway(icaoForSpots, rwy);
+        const spotSummaryClass = 'heroSpot';
         if (matches.length) {
           const best = matches[0];
-          heroSpotHtml = `
-        <button type="button" class="heroSpot" data-rwy="${rawRwy || ''}" data-level="${rawRwyLevel || ''}" data-flight="${escapeHtml(pickLabel(it))}" aria-label="Best spotting position">
+          spotSummaryHtml = `
+        <button type="button" class="${spotSummaryClass}" data-rwy="${rwy || ''}" data-level="high" data-flight="${escapeHtml(pickLabel(it))}" aria-label="Best spotting position">
           <div class="heroSpotItem"><div class="k">Best Spot</div><div class="v">${escapeHtml(best.name)}</div></div>
           <div class="heroSpotItem"><div class="k">Lens</div><div class="v">${escapeHtml(best.lens)}</div></div>
         </button>`;
         } else if (missingPrimary) {
           // Same honesty showSpotModal already surfaces when the ideal spot for this runway is
           // currently closed/temporary -- no Lens column since that spot isn't actually usable.
-          heroSpotHtml = `
-        <button type="button" class="heroSpot heroSpot-missing" data-rwy="${rawRwy || ''}" data-level="${rawRwyLevel || ''}" data-flight="${escapeHtml(pickLabel(it))}" aria-label="Best spotting position">
+          spotSummaryHtml = `
+        <button type="button" class="${spotSummaryClass} heroSpot-missing" data-rwy="${rwy || ''}" data-level="high" data-flight="${escapeHtml(pickLabel(it))}" aria-label="Best spotting position">
           <div class="heroSpotItem"><div class="k">Best Spot</div><div class="v">${escapeHtml(missingPrimary.name)} (${escapeHtml(missingPrimary.status)})</div></div>
         </button>`;
         }
@@ -4407,7 +4432,7 @@ function airlineNameFromFlight(flight) {
         ${heroTimeHtml}
         ${confBar}
         ${gridHtml}
-        ${heroSpotHtml}
+        ${spotSummaryHtml}
       `;
 
       if (isHero) {
@@ -4435,14 +4460,14 @@ function airlineNameFromFlight(flight) {
         });
       }
 
-      // Same interaction as the eye-icon spotBtn above -- tapping the inline hero summary opens
-      // the identical spotModal with the identical arguments, not a second interaction pattern.
-      const heroSpotBtn = card.querySelector('button.heroSpot');
-      if (heroSpotBtn) {
-        heroSpotBtn.addEventListener('click', (e) => {
+      // Tapping the inline summary opens the same spot modal as the eye-icon button, using the
+      // confirmed runway that produced the summary.
+      const spotSummaryBtn = card.querySelector('button.heroSpot');
+      if (spotSummaryBtn) {
+        spotSummaryBtn.addEventListener('click', (e) => {
           e.preventDefault();
           e.stopPropagation();
-          showSpotModal(heroSpotBtn.getAttribute('data-rwy') || '', heroSpotBtn.getAttribute('data-flight') || '', heroSpotBtn.getAttribute('data-level') || '');
+          showSpotModal(spotSummaryBtn.getAttribute('data-rwy') || '', spotSummaryBtn.getAttribute('data-flight') || '', spotSummaryBtn.getAttribute('data-level') || '');
         });
       }
 
@@ -4629,19 +4654,17 @@ function airlineNameFromFlight(flight) {
           </div>
         `;
         }).join('');
-        body.innerHTML = `${estimateNote}${missingHtml}<div class="spotCards">${cardsHtml}</div>`;
+        body.innerHTML = `${estimateNote}${missingHtml}<div class="spotNavHint">Tap <b>Navigate</b> to open driving directions to a spotting location.</div><div class="spotCards">${cardsHtml}</div>`;
       }
     }
 
-    modal.classList.add('show');
-    modal.setAttribute('aria-hidden', 'false');
+    window.SpottersDialogs.show(modal);
   }
 
   function hideSpotModal() {
     const modal = document.getElementById('spotModal');
     if (!modal) return;
-    modal.classList.remove('show');
-    modal.setAttribute('aria-hidden', 'true');
+    window.SpottersDialogs.hide(modal);
   }
 
   function escapeHtml(s) {
@@ -5225,16 +5248,14 @@ let savedShots = sanitizeSavedShots(loadSaved());
   function openSavedModal() {
     if (!$savedModal) return;
     renderSavedList();
-    $savedModal.classList.add('show');
-    $savedModal.setAttribute('aria-hidden', 'false');
+    window.SpottersDialogs.show($savedModal);
     if ($savedBtn) $savedBtn.classList.add('active');
     if ($navSettingsBtn) $navSettingsBtn.classList.remove('active');
   }
 
   function closeSavedModal() {
     if (!$savedModal) return;
-    $savedModal.classList.remove('show');
-    $savedModal.setAttribute('aria-hidden', 'true');
+    window.SpottersDialogs.hide($savedModal);
     updateNavActiveState();
   }
 
@@ -5428,15 +5449,13 @@ if ($closeSavedBtn) $closeSavedBtn.addEventListener('click', closeSavedModal);
   const $settingsClose = document.getElementById('settingsClose');
   function openSettingsModal() {
     if (!$settingsModal) return;
-    $settingsModal.classList.add('show');
-    $settingsModal.setAttribute('aria-hidden', 'false');
+    window.SpottersDialogs.show($settingsModal);
     if ($navSettingsBtn) $navSettingsBtn.classList.add('active');
     if ($savedBtn) $savedBtn.classList.remove('active');
   }
   function closeSettingsModal() {
     if (!$settingsModal) return;
-    $settingsModal.classList.remove('show');
-    $settingsModal.setAttribute('aria-hidden', 'true');
+    window.SpottersDialogs.hide($settingsModal);
     updateNavActiveState();
   }
   if ($navSettingsBtn) $navSettingsBtn.addEventListener('click', openSettingsModal);
@@ -5866,8 +5885,7 @@ if ($closeSavedBtn) $closeSavedBtn.addEventListener('click', closeSavedModal);
       <div>Position as of ${posAt} (${ageMin} min ago)</div>
     `;
 
-    modal.classList.add('show');
-    modal.setAttribute('aria-hidden', 'false');
+    window.SpottersDialogs.show(modal);
 
     ensureBoardSnapshotMap();
     if (boardSnapshotMap && typeof p.lat === 'number' && typeof p.lon === 'number') {
@@ -5894,8 +5912,7 @@ if ($closeSavedBtn) $closeSavedBtn.addEventListener('click', closeSavedModal);
   function boardCloseModal() {
     const modal = document.getElementById('boardModal');
     if (!modal) return;
-    modal.classList.remove('show');
-    modal.setAttribute('aria-hidden', 'true');
+    window.SpottersDialogs.hide(modal);
     if (boardSnapshotMap) {
       if (boardSnapshotAcMarker) { boardSnapshotMap.removeLayer(boardSnapshotAcMarker); boardSnapshotAcMarker = null; }
       if (boardSnapshotAptMarker) { boardSnapshotMap.removeLayer(boardSnapshotAptMarker); boardSnapshotAptMarker = null; }
@@ -5924,7 +5941,7 @@ if ($closeSavedBtn) $closeSavedBtn.addEventListener('click', closeSavedModal);
     window.addEventListener('load', async () => {
       try {
         // cache-bust SW request so WordPress/CDN caches don't pin it
-        const swUrl = `./sw.js?v=${encodeURIComponent(VERSION)}`;
+        const swUrl = `./sw.js?v=${encodeURIComponent(VERSION)}-20261121-ios-layout`;
         await navigator.serviceWorker.register(swUrl, { scope: './' });
       } catch (e) {
         // SW is optional; don't block the app
@@ -5934,7 +5951,5 @@ if ($closeSavedBtn) $closeSavedBtn.addEventListener('click', closeSavedModal);
   }
 })();
 </script>
-
-<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v4513226cdae34746b4dedf0b4dfa099e1781791509496" integrity="sha512-ZE9pZaUXND66v380QUtch/5sE9tPFh2zg45pR2PB0CVkCtOREv2AJKkSidISWkysEuQ0EH8faUU5du78bx87UQ==" data-cf-beacon='{"version":"2024.11.0","token":"523ae17e429a452a8134dc9d185b3b21","r":1,"server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
 </body>
 </html>

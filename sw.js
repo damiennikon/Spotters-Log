@@ -1,11 +1,13 @@
-/* Photo Log SW 0.6.3.1 */
-const CACHE = "photolog-0.6.4.8";
+/* Photo Log SW 0.6.4.12-ios-layout-20261121 */
+const CACHE = "photolog-0.6.4.12-ios-layout-20261121";
 const CORE = [
   "./",
   "./index.html",
   "./manifest.json",
-  "./icon-192.png",
-  "./icon-512.png",
+  "./dialogs.css?v=20261121-ios-layout",
+  "./dialogs.js?v=20261121-ios-layout",
+  "./icons/icon-192.png",
+  "./icons/icon-512.png",
 ];
 
 self.addEventListener("install", (e) => {
@@ -19,7 +21,7 @@ self.addEventListener("install", (e) => {
 self.addEventListener("activate", (e) => {
   e.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(keys.map((k) => (k === CACHE ? null : caches.delete(k))))
+      Promise.all(keys.map((k) => (k.startsWith("photolog-") && k !== CACHE ? caches.delete(k) : null)))
     ).then(() => self.clients.claim())
   );
 });
@@ -28,6 +30,8 @@ self.addEventListener("activate", (e) => {
 self.addEventListener("fetch", (e) => {
   const req = e.request;
   const url = new URL(req.url);
+
+  if (req.method !== "GET" || url.origin !== self.location.origin || !url.href.startsWith(self.registration.scope)) return;
 
   // Never cache the proxy endpoint (always hit network).
   if (url.pathname.endsWith("/proxy.php") || url.pathname.endsWith("/proxy.ph1")) {

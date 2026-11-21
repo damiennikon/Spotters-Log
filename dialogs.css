@@ -1,0 +1,41 @@
+/* Loaded after the original stylesheet. The overlay never scrolls; only the
+   middle row does. No transforms on the overlay or any of its ancestors. */
+.modal {
+  inset: auto 0 auto;
+  top: var(--sl-viewport-top, 0px);
+  height: 100vh;
+  height: 100dvh;
+  height: var(--sl-viewport-height, 100dvh);
+  overflow: hidden;
+  overscroll-behavior: none;
+  padding: max(8px, env(safe-area-inset-top, 0px))
+    max(8px, env(safe-area-inset-right, 0px))
+    max(8px, env(safe-area-inset-bottom, 0px))
+    max(8px, env(safe-area-inset-left, 0px));
+}
+.modalCard {
+  max-height: min(100%, 760px);
+  min-height: 0;
+  border-radius: 18px;
+  flex: 0 1 auto;
+}
+.modalHead, .modalFoot { flex: 0 0 auto; }
+.modalFoot .btn { min-width: 0; white-space: normal; }
+.modalBody, .savedList {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+}
+.modalBody { align-content: start; }
+/* One scroll owner for the airport content, including the complete list and
+   install help. The action row remains outside this region. */
+.modal .pickerList { max-height: none; overflow: visible; flex-shrink: 0; }
+.modal .iconBtn { flex-shrink: 0; min-width: 32px; }
+.modalHead > div { min-width: 0; }
+@media (max-height: 420px) {
+  .modalHead { padding: 10px 14px 8px; }
+  .modalFoot { padding: 8px 14px; }
+  .modalBody { padding: 10px 14px; }
+}
